@@ -1,0 +1,72 @@
+{
+  "expo": {
+    "name": "Urban Super Foodie",
+    "slug": "urban-super-foodie",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "urbansuperfoodie",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "backgroundColor": "#0B0B12",
+      "resizeMode": "contain"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.urbansuperfoodie.app",
+      "config": {
+        "googleMapsApiKey": "AIzaSyDptWdZugy-Ovvhp6vMv753Hd9XysGiUA8"
+      },
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Urban Super Foodie uses your location to find the best places to eat, drink, and explore around you.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Urban Super Foodie uses your location to find the best places to eat, drink, and explore around you, even when the app is in the background.",
+        "NSPhotoLibraryUsageDescription": "Urban Super Foodie uses your photo library to set your profile picture.",
+        "NSCameraUsageDescription": "Urban Super Foodie uses the camera to take your profile picture."
+      }
+    },
+    "android": {
+      "package": "com.urbansuperfoodie.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B0B12"
+      },
+      "permissions": [
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyDptWdZugy-Ovvhp6vMv753Hd9XysGiUA8"
+        }
+      }
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Urban Super Foodie uses your location to find the best places to eat, drink, and explore around you.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Urban Super Foodie needs access to your photos so you can set a profile picture.",
+          "cameraPermission": "Urban Super Foodie needs camera access so you can take a profile picture."
+        }
+      ],
+      "expo-asset"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "8d8fafa4-d73d-4017-becf-c458d9b24831"
+      }
+    },
+    "owner": "hverkasalo"
+  }
+}

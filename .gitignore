@@ -1,0 +1,36 @@
+# Secrets — never commit
+.env
+.env.local
+.env.*.local
+.eas-token
+
+# Dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+*.tgz
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# Native
+android/
+ios/
+
+# Metro
+.metro-health-check*
+
+# Build / cache
+*.log
+.DS_Store
+.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
