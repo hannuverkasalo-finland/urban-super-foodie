@@ -11,6 +11,8 @@ import { reverseGeocode, findPlace, geocodeCity } from '../api/googlePlaces';
 import { useLocationStore } from '../store/locationStore';
 import { useUserStore } from '../store/userStore';
 import { useContentStore } from '../store/contentStore';
+import { useDebugLog } from '../store/debugLog';
+import { cityKeyFor, prefetchCity } from '../services/prefetchService';
 import { colors, radius, spacing, typography } from '../theme';
 import Button from './Button';
 
@@ -39,9 +41,16 @@ interface Props {
 export default function DebugPanel({ visible, onClose }: Props) {
   const [results, setResults] = useState<TestResult[]>([]);
   const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
   const profile = useUserStore((s) => s.profile);
+  const preferences = useUserStore((s) => s.preferences);
   const location = useLocationStore();
   const cityCache = useContentStore((s) => s.cityCache);
+  const cityStatus = useContentStore((s) => s.status);
+  const cityErrors = useContentStore((s) => s.errors);
+  const invalidateCity = useContentStore((s) => s.invalidate);
+  const debugEntries = useDebugLog((s) => s.entries);
+  const clearLog = useDebugLog((s) => s.clear);
 
   async function timed(
     name: string,
@@ -63,6 +72,7 @@ export default function DebugPanel({ visible, onClose }: Props) {
 
   async function runAll() {
     setBusy(true);
+    setBusyAction('Network tests');
     setResults([]);
     const tests: TestResult[] = [];
 
@@ -72,7 +82,7 @@ export default function DebugPanel({ visible, onClose }: Props) {
         const text = (await res.text()).slice(0, 80);
         return {
           ok: res.ok,
-          detail: `HTTP ${res.status} · body: ${text.replace(/\n/g, ' ')}`,
+          detail: `HTTP ${res.status} · ${text.replace(/\n/g, ' ')}`,
         };
       })
     );
@@ -81,14 +91,14 @@ export default function DebugPanel({ visible, onClose }: Props) {
       await timed('2. Google Geocoding API (forward)', async () => {
         const r = await geocodeCity('Tokyo');
         return r
-          ? { ok: true, detail: `Tokyo → lat=${r.lat.toFixed(3)}, lng=${r.lng.toFixed(3)}, country=${r.country}` }
-          : { ok: false, detail: 'returned null — see warn logs' };
+          ? { ok: true, detail: `Tokyo → ${r.city}, ${r.country}` }
+          : { ok: false, detail: 'returned null' };
       })
     );
 
     tests.push(
-      await timed('3. Google Geocoding API (reverse)', async () => {
-        const r = await reverseGeocode(35.6762, 139.6503);
+      await timed('3. Google Geocoding API (reverse, Bergamo)', async () => {
+        const r = await reverseGeocode(45.6661, 9.7020);
         return r
           ? { ok: true, detail: `${r.city}, ${r.country}` }
           : { ok: false, detail: 'returned null' };
@@ -96,8 +106,8 @@ export default function DebugPanel({ visible, onClose }: Props) {
     );
 
     tests.push(
-      await timed('4. Google Places find_place', async () => {
-        const r = await findPlace('Sushi Saito', 'Tokyo, Japan');
+      await timed('4. Google Places find (Da Vittorio Bergamo)', async () => {
+        const r = await findPlace('Da Vittorio', 'Bergamo, Italy');
         return r
           ? {
               ok: true,
@@ -135,7 +145,31 @@ export default function DebugPanel({ visible, onClose }: Props) {
 
     setResults(tests);
     setBusy(false);
+    setBusyAction(null);
   }
+
+  async function forcePrefetch() {
+    if (!location.city) return;
+    setBusy(true);
+    setBusyAction('Force prefetch (~30-90s)');
+    try {
+      await prefetchCity(
+        location.city.name,
+        location.city.country,
+        preferences,
+        { force: true }
+      );
+    } finally {
+      setBusy(false);
+      setBusyAction(null);
+    }
+  }
+
+  function clearAllCacheNow() {
+    Object.keys(cityCache).forEach((k) => invalidateCity(k));
+  }
+
+  const cacheKeys = Object.keys(cityCache);
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="formSheet">
@@ -173,39 +207,112 @@ export default function DebugPanel({ visible, onClose }: Props) {
             />
             <DebugRow
               k="city"
-              v={location.city ? `${location.city.name}, ${location.city.country}` : '(none)'}
+              v={
+                location.city
+                  ? `${location.city.name}, ${location.city.country}`
+                  : '(none)'
+              }
             />
             <DebugRow
               k="location.lastError"
               v={location.lastError ?? '(none)'}
               wrap
             />
-            <DebugRow
-              k="cityCache keys"
-              v={Object.keys(cityCache).join(', ') || '(none cached)'}
-              wrap
+          </View>
+
+          <Text style={styles.sectionTitle}>Cache contents</Text>
+          <View style={styles.box}>
+            {cacheKeys.length === 0 && (
+              <Text style={styles.val}>(no cities cached yet)</Text>
+            )}
+            {cacheKeys.map((k) => {
+              const c = cityCache[k];
+              const stat = cityStatus[k] ?? '(idle)';
+              const err = cityErrors[k];
+              return (
+                <View key={k} style={styles.row}>
+                  <Text style={styles.key}>
+                    {k} · status={stat}
+                  </Text>
+                  <Text style={styles.val} selectable>
+                    eat={c.eatPlaces.length} · drink={c.drinkPlaces.length} · do=
+                    {c.doPlaces.length} · craft={c.craftPages.length} · info=
+                    {c.infoPages.length}
+                  </Text>
+                  <Text style={styles.val} selectable>
+                    fetched {Math.round((Date.now() - c.fetchedAt) / 1000)}s ago
+                  </Text>
+                  {err && (
+                    <Text style={[styles.val, { color: colors.danger }]} selectable>
+                      err: {err}
+                    </Text>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+
+          <Text style={styles.sectionTitle}>Actions</Text>
+          <View style={styles.actionsRow}>
+            <Button
+              label={busyAction ?? 'Run network tests'}
+              onPress={runAll}
+              disabled={busy}
+            />
+            <Button
+              label="Force prefetch this city"
+              variant="ghost"
+              onPress={forcePrefetch}
+              disabled={busy || !location.city}
+            />
+            <Button
+              label="Clear cache"
+              variant="ghost"
+              onPress={clearAllCacheNow}
+              disabled={busy}
             />
           </View>
 
-          <Text style={styles.sectionTitle}>Network tests</Text>
-          <Button
-            label={busy ? 'Running…' : 'Run all tests'}
-            onPress={runAll}
-            disabled={busy}
-          />
-
           {results.length > 0 && (
-            <View style={[styles.box, { marginTop: spacing.m }]}>
+            <View style={[styles.box, { marginTop: spacing.s }]}>
               {results.map((r, i) => (
                 <View key={i} style={styles.testRow}>
                   <Text style={styles.testName}>
                     {r.ok ? '✅' : '❌'} {r.name} · {r.durationMs}ms
                   </Text>
-                  <Text style={styles.testDetail}>{r.detail}</Text>
+                  <Text style={styles.testDetail} selectable>
+                    {r.detail}
+                  </Text>
                 </View>
               ))}
             </View>
           )}
+
+          <View style={styles.logHeader}>
+            <Text style={styles.sectionTitle}>Recent log ({debugEntries.length})</Text>
+            <Button label="Clear log" variant="ghost" onPress={clearLog} />
+          </View>
+          <View style={styles.box}>
+            {debugEntries.length === 0 && (
+              <Text style={styles.val}>(no entries)</Text>
+            )}
+            {debugEntries.slice(0, 50).map((e, i) => {
+              const ts = new Date(e.ts).toLocaleTimeString();
+              const colorStyle =
+                e.level === 'error'
+                  ? { color: colors.danger }
+                  : e.level === 'warn'
+                  ? { color: colors.warning }
+                  : { color: colors.text };
+              return (
+                <View key={i} style={styles.logRow}>
+                  <Text style={[styles.logLine, colorStyle]} selectable>
+                    {ts} [{e.tag}] {e.message}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
         </ScrollView>
       </View>
     </Modal>
@@ -263,6 +370,7 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'android' ? 'monospace' : 'Courier',
     fontSize: 12,
   },
+  actionsRow: { gap: spacing.s, marginTop: 4 },
   testRow: {
     paddingVertical: 6,
     borderBottomWidth: 1,
@@ -275,5 +383,17 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'android' ? 'monospace' : 'Courier',
     fontSize: 11,
     lineHeight: 16,
+  },
+  logHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.m,
+  },
+  logRow: { marginBottom: 4 },
+  logLine: {
+    fontFamily: Platform.OS === 'android' ? 'monospace' : 'Courier',
+    fontSize: 11,
+    lineHeight: 15,
   },
 });

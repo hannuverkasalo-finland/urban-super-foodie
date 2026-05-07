@@ -140,9 +140,13 @@ export async function reverseGeocode(
     const findComp = (...types: string[]) =>
       components.find((c) => types.some((t) => c.types?.includes(t)))
         ?.long_name;
+    // Prefer locality / sublocality / admin_level_3 (city-level) over admin_level_2 (province).
+    // Fixes "Provincia di Bergamo" → "Bergamo" so Claude curates city picks, not province picks.
     const city =
       findComp('locality') ??
       findComp('postal_town') ??
+      findComp('administrative_area_level_3') ??
+      findComp('sublocality') ??
       findComp('administrative_area_level_2') ??
       findComp('administrative_area_level_1') ??
       'Unknown city';

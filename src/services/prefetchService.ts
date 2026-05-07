@@ -6,6 +6,7 @@ import {
 } from '../api/claude';
 import { buildPhotoUrl, findPlace } from '../api/googlePlaces';
 import { useContentStore } from '../store/contentStore';
+import { dlog, dwarn, derror } from '../store/debugLog';
 import { useUserStore } from '../store/userStore';
 import type {
   CityContent,
@@ -28,7 +29,9 @@ async function enrichSeeds(
 ): Promise<CuratedPlace[]> {
   const cityHint = `${cityName}, ${countryName}`;
   const enriched: CuratedPlace[] = [];
-  // Process in small batches to avoid rate limits
+  let foundCount = 0;
+  let nullCount = 0;
+  let belowThresholdCount = 0;
   const batchSize = 5;
   for (let i = 0; i < seeds.length; i += batchSize) {
     const batch = seeds.slice(i, i + batchSize);
@@ -36,11 +39,16 @@ async function enrichSeeds(
       batch.map(async (seed, idx) => {
         try {
           const found = await findPlace(seed.name, cityHint);
-          if (!found) return null;
+          if (!found) {
+            nullCount++;
+            return null;
+          }
+          foundCount++;
           if (
             (found.rating ?? 0) < 4.0 ||
             (found.userRatingsTotal ?? 0) < 10
           ) {
+            belowThresholdCount++;
             return null;
           }
           const place: CuratedPlace = {
@@ -63,7 +71,11 @@ async function enrichSeeds(
             rank: i + idx + 1,
           };
           return place;
-        } catch {
+        } catch (err) {
+          dwarn(
+            'prefetch',
+            `enrichSeeds(${category}) error for ${seed.name}: ${err instanceof Error ? err.message : String(err)}`
+          );
           return null;
         }
       })
@@ -72,6 +84,10 @@ async function enrichSeeds(
       ...results.filter((p): p is CuratedPlace => p !== null)
     );
   }
+  dlog(
+    'prefetch',
+    `enrichSeeds(${category}): ${seeds.length} seeds → found ${foundCount}, null ${nullCount}, below threshold ${belowThresholdCount}, kept ${enriched.length}`
+  );
   return enriched;
 }
 
@@ -86,25 +102,68 @@ export async function prefetchCity(
 
   if (!options.force) {
     const fresh = store.getFresh(key);
-    if (fresh) return fresh;
+    if (fresh) {
+      dlog(
+        'prefetch',
+        `cache hit ${key}: eat=${fresh.eatPlaces.length}, drink=${fresh.drinkPlaces.length}, do=${fresh.doPlaces.length}, craft=${fresh.craftPages.length}, info=${fresh.infoPages.length}`
+      );
+      return fresh;
+    }
   }
 
-  if (store.status[key] === 'loading') return null;
+  if (store.status[key] === 'loading') {
+    dlog('prefetch', `already loading ${key}`);
+    return null;
+  }
 
+  dlog('prefetch', `start ${key} (force=${!!options.force})`);
   store.setStatus(key, 'loading');
   store.setError(key, null);
 
   try {
-    const [eatSeeds, drinkSeeds, doSeeds, craftPages, infoPages] =
-      await Promise.all([
-        curatePlaces('eat', cityName, countryName, prefs, 30).catch(() => []),
-        curatePlaces('drink', cityName, countryName, prefs, 30).catch(
-          () => []
-        ),
-        curatePlaces('do', cityName, countryName, prefs, 30).catch(() => []),
-        generateCraftContent(cityName, countryName, prefs).catch(() => []),
-        generateInfoContent(cityName, countryName).catch(() => []),
-      ]);
+    const t0 = Date.now();
+    const seedResults = await Promise.all([
+      curatePlaces('eat', cityName, countryName, prefs, 30).catch((err) => {
+        dwarn(
+          'prefetch',
+          `curatePlaces(eat) failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+        return [] as CuratedPlaceSeed[];
+      }),
+      curatePlaces('drink', cityName, countryName, prefs, 30).catch((err) => {
+        dwarn(
+          'prefetch',
+          `curatePlaces(drink) failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+        return [] as CuratedPlaceSeed[];
+      }),
+      curatePlaces('do', cityName, countryName, prefs, 30).catch((err) => {
+        dwarn(
+          'prefetch',
+          `curatePlaces(do) failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+        return [] as CuratedPlaceSeed[];
+      }),
+      generateCraftContent(cityName, countryName, prefs).catch((err) => {
+        dwarn(
+          'prefetch',
+          `craft failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+        return [];
+      }),
+      generateInfoContent(cityName, countryName).catch((err) => {
+        dwarn(
+          'prefetch',
+          `info failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+        return [];
+      }),
+    ]);
+    const [eatSeeds, drinkSeeds, doSeeds, craftPages, infoPages] = seedResults;
+    dlog(
+      'prefetch',
+      `Claude returned: eat=${eatSeeds.length}, drink=${drinkSeeds.length}, do=${doSeeds.length}, craft=${craftPages.length}, info=${infoPages.length} (${Date.now() - t0}ms)`
+    );
 
     const [eatPlaces, drinkPlaces, doPlaces] = await Promise.all([
       enrichSeeds(eatSeeds, 'eat', cityName, countryName),
@@ -122,10 +181,15 @@ export async function prefetchCity(
       craftPages,
       infoPages,
     };
+    dlog(
+      'prefetch',
+      `done ${key} in ${Date.now() - t0}ms: eat=${eatPlaces.length}, drink=${drinkPlaces.length}, do=${doPlaces.length}, craft=${craftPages.length}, info=${infoPages.length}`
+    );
     store.storeCity(content);
     return content;
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Failed to fetch city';
+    derror('prefetch', `failed: ${msg}`);
     store.setError(key, msg);
     store.setStatus(key, 'error');
     return null;

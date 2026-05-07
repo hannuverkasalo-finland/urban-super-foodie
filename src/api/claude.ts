@@ -4,6 +4,7 @@ import {
   DRINK_SOURCES,
   EAT_SOURCES,
 } from '../constants/sources';
+import { dlog, dwarn } from '../store/debugLog';
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const API_KEY = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY ?? '';
@@ -26,18 +27,19 @@ interface AnthropicResponse {
 async function callClaude(
   systemPrompt: string,
   userPrompt: string,
-  maxTokens = 4000
+  maxTokens = 4000,
+  label = 'claude'
 ): Promise<string> {
   if (!API_KEY) {
     throw new Error('Missing EXPO_PUBLIC_ANTHROPIC_API_KEY');
   }
+  const t0 = Date.now();
   const res = await fetch(ANTHROPIC_URL, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       'x-api-key': API_KEY,
       'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
       model: MODEL,
@@ -48,6 +50,7 @@ async function callClaude(
   });
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
+    dwarn(label, `HTTP ${res.status}: ${errText.slice(0, 200)}`);
     throw new Error(`Claude ${res.status}: ${errText.slice(0, 300)}`);
   }
   const data: AnthropicResponse = await res.json();
@@ -56,11 +59,18 @@ async function callClaude(
     .map((c) => c.text ?? '')
     .join('\n')
     .trim();
-  if (!text) throw new Error('Empty Claude response');
+  if (!text) {
+    dwarn(label, 'empty response');
+    throw new Error('Empty Claude response');
+  }
+  dlog(
+    label,
+    `${Date.now() - t0}ms · ${text.length} chars · stop=${data.stop_reason ?? '?'}`
+  );
   return text;
 }
 
-function extractJson<T>(raw: string): T {
+function extractJson<T>(raw: string, label = 'parse'): T {
   const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
   const candidate = fenceMatch ? fenceMatch[1] : raw;
   const firstBrace = candidate.indexOf('{');
@@ -70,13 +80,22 @@ function extractJson<T>(raw: string): T {
   else if (firstBracket === -1) start = firstBrace;
   else start = Math.min(firstBrace, firstBracket);
   if (start < 0) {
+    dwarn(label, `no JSON found in: ${raw.slice(0, 200)}`);
     throw new Error(`Could not find JSON in: ${raw.slice(0, 200)}`);
   }
   const lastBrace = candidate.lastIndexOf('}');
   const lastBracket = candidate.lastIndexOf(']');
   const end = Math.max(lastBrace, lastBracket);
   const sliced = candidate.slice(start, end + 1);
-  return JSON.parse(sliced) as T;
+  try {
+    return JSON.parse(sliced) as T;
+  } catch (err) {
+    dwarn(
+      label,
+      `JSON.parse failed: ${err instanceof Error ? err.message : String(err)}; sample: ${sliced.slice(0, 200)}`
+    );
+    throw err;
+  }
 }
 
 function preferencesBlock(prefs: UserPreferences): string {
@@ -154,8 +173,8 @@ Strict requirements:
 - Diverse mix across price points and neighborhoods
 - Output ONLY the JSON array, nothing else.`;
 
-  const raw = await callClaude(system, user, 8000);
-  return extractJson<CuratedPlaceSeed[]>(raw);
+  const raw = await callClaude(system, user, 8000, `claude.${category}`);
+  return extractJson<CuratedPlaceSeed[]>(raw, `parse.${category}`);
 }
 
 export async function generateCraftContent(
@@ -193,8 +212,8 @@ Output JSON only — an array of exactly 3 objects with this exact shape:
 ]
 Tailor recommendations to the user's preferences when possible. Mention specific neighborhoods or markets where relevant. Output ONLY the JSON array.`;
 
-  const raw = await callClaude(system, user, 4000);
-  const pages = extractJson<ContentPage[]>(raw);
+  const raw = await callClaude(system, user, 4000, 'claude.craft');
+  const pages = extractJson<ContentPage[]>(raw, 'parse.craft');
   return pages.slice(0, 3);
 }
 
@@ -223,7 +242,7 @@ Output JSON only — an array of exactly 3 objects:
 ]
 Output ONLY the JSON array.`;
 
-  const raw = await callClaude(system, user, 4000);
-  const pages = extractJson<ContentPage[]>(raw);
+  const raw = await callClaude(system, user, 4000, 'claude.info');
+  const pages = extractJson<ContentPage[]>(raw, 'parse.info');
   return pages.slice(0, 3);
 }

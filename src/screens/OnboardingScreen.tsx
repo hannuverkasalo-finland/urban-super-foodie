@@ -47,9 +47,8 @@ export default function OnboardingScreen({ onDone }: Props) {
       }
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [1, 1],
         quality: 0.7,
+        selectionLimit: 1,
       });
       if (result.canceled) return;
       const uri = result.assets?.[0]?.uri;
@@ -127,7 +126,7 @@ export default function OnboardingScreen({ onDone }: Props) {
             {profile.photoUri ? 'Tap to change' : 'Add a photo'}
           </Text>
           {photoError && (
-            <Text style={styles.photoErrorText} numberOfLines={3}>
+            <Text style={styles.photoErrorText} selectable>
               {photoError}
             </Text>
           )}
