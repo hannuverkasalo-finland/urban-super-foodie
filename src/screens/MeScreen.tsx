@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import DebugPanel from '../components/DebugPanel';
 import MultiSelectChips from '../components/MultiSelectChips';
 import Section from '../components/Section';
 import { ACTIVITY_TYPES } from '../constants/activityTypes';
@@ -41,18 +42,35 @@ export default function MeScreen() {
   const [yearText, setYearText] = useState(
     profile.birthYear ? String(profile.birthYear) : ''
   );
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
 
   async function pickPhoto() {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.7,
-    });
-    if (!result.canceled && result.assets[0]) {
-      updateProfile({ photoUri: result.assets[0].uri });
+    setPhotoError(null);
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        setPhotoError('Photo library permission denied');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+      });
+      if (result.canceled) return;
+      const uri = result.assets?.[0]?.uri;
+      if (!uri) {
+        setPhotoError(`Picker returned no uri (assets=${JSON.stringify(result.assets)?.slice(0, 80)})`);
+        return;
+      }
+      console.log('[USF] photo picked uri:', uri);
+      updateProfile({ photoUri: uri });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setPhotoError(msg);
+      console.warn('[USF] pickPhoto failed:', msg);
     }
   }
 
@@ -73,10 +91,23 @@ export default function MeScreen() {
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
         >
-          <Text style={styles.headline}>Me</Text>
-          <Text style={styles.lead}>
-            Tune your tastes — we'll re-curate every city you visit.
-          </Text>
+          <View style={styles.headlineRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.headline}>Me</Text>
+              <Text style={styles.lead}>
+                Tune your tastes — we'll re-curate every city you visit.
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => setDebugOpen(true)}
+              style={({ pressed }) => [
+                styles.debugButton,
+                pressed && { opacity: 0.6 },
+              ]}
+            >
+              <Text style={styles.debugButtonText}>🔧 Debug</Text>
+            </Pressable>
+          </View>
 
           <View style={styles.profileBlock}>
             <Pressable onPress={pickPhoto} style={styles.avatar}>
@@ -84,6 +115,11 @@ export default function MeScreen() {
                 <Image
                   source={{ uri: profile.photoUri }}
                   style={styles.avatarImg}
+                  onError={(e) => {
+                    const msg = e.nativeEvent.error ?? 'image failed to load';
+                    setPhotoError(`Image render failed: ${msg}`);
+                    console.warn('[USF] image error:', msg, 'uri:', profile.photoUri);
+                  }}
                 />
               ) : (
                 <Text style={styles.avatarPlaceholder}>📷</Text>
@@ -97,6 +133,11 @@ export default function MeScreen() {
                 {profile.birthYear ? `${profile.birthYear} · ` : ''}
                 {profile.gender ?? '—'} · {profile.language}
               </Text>
+              {photoError && (
+                <Text style={styles.photoError} numberOfLines={3}>
+                  {photoError}
+                </Text>
+              )}
             </View>
           </View>
 
@@ -225,6 +266,8 @@ export default function MeScreen() {
           </Section>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <DebugPanel visible={debugOpen} onClose={() => setDebugOpen(false)} />
     </SafeAreaView>
   );
 }
@@ -232,12 +275,32 @@ export default function MeScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: spacing.l, paddingBottom: spacing.xxl },
+  headlineRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: spacing.l,
+  },
   headline: { ...typography.display, color: colors.text },
   lead: {
     ...typography.body,
     color: colors.textMuted,
     marginTop: 4,
-    marginBottom: spacing.l,
+  },
+  debugButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    backgroundColor: colors.bgChip,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginTop: 6,
+  },
+  debugButtonText: { ...typography.micro, color: colors.text },
+  photoError: {
+    ...typography.small,
+    color: colors.danger,
+    marginTop: 6,
   },
   profileBlock: {
     flexDirection: 'row',

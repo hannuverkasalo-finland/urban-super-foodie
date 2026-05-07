@@ -18,7 +18,10 @@
       "Bash(EXPO_TOKEN=$\\(cat .eas-token\\) npx eas-cli init --non-interactive --force)",
       "Bash(export EXPO_TOKEN=$\\(cat .eas-token\\))",
       "Bash(git init *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git -c user.name=\"USF Build\" -c user.email=\"build@local\" commit -q -m \"Initial Urban Super Foodie project\")",
+      "Bash(node -e \"const d=JSON.parse\\(require\\('fs'\\).readFileSync\\(0,'utf8'\\)\\); console.log\\('status:', d.status, '| platform:', d.platform, '| profile:', d.buildProfile\\)\")",
+      "Bash(git -c user.name=\"USF Build\" -c user.email=\"build@local\" commit -q -m \"Add DebugPanel, INTERNET permission, photo error surfacing\")"
     ]
   }
 }

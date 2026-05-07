@@ -35,18 +35,34 @@ export default function OnboardingScreen({ onDone }: Props) {
   const [yearText, setYearText] = useState(
     profile.birthYear ? String(profile.birthYear) : ''
   );
+  const [photoError, setPhotoError] = useState<string | null>(null);
 
   async function pickPhoto() {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.7,
-    });
-    if (!result.canceled && result.assets[0]) {
-      updateProfile({ photoUri: result.assets[0].uri });
+    setPhotoError(null);
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        setPhotoError('Photo library permission denied');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+      });
+      if (result.canceled) return;
+      const uri = result.assets?.[0]?.uri;
+      if (!uri) {
+        setPhotoError('Picker returned no uri');
+        return;
+      }
+      console.log('[USF] onboarding photo uri:', uri);
+      updateProfile({ photoUri: uri });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setPhotoError(msg);
+      console.warn('[USF] onboarding pickPhoto failed:', msg);
     }
   }
 
@@ -97,6 +113,11 @@ export default function OnboardingScreen({ onDone }: Props) {
               <Image
                 source={{ uri: profile.photoUri }}
                 style={styles.photo}
+                onError={(e) => {
+                  const msg = e.nativeEvent.error ?? 'unknown';
+                  setPhotoError(`Image render failed: ${msg}`);
+                  console.warn('[USF] onboarding image error:', msg);
+                }}
               />
             ) : (
               <Text style={styles.photoPlaceholder}>📷</Text>
@@ -105,6 +126,11 @@ export default function OnboardingScreen({ onDone }: Props) {
           <Text style={styles.photoLabel}>
             {profile.photoUri ? 'Tap to change' : 'Add a photo'}
           </Text>
+          {photoError && (
+            <Text style={styles.photoErrorText} numberOfLines={3}>
+              {photoError}
+            </Text>
+          )}
         </View>
 
         <View style={styles.field}>
@@ -224,6 +250,13 @@ const styles = StyleSheet.create({
     ...typography.small,
     color: colors.textMuted,
     marginTop: spacing.s,
+  },
+  photoErrorText: {
+    ...typography.small,
+    color: colors.danger,
+    textAlign: 'center',
+    marginTop: 4,
+    paddingHorizontal: spacing.l,
   },
   field: { marginBottom: spacing.l },
   fieldLabel: {
