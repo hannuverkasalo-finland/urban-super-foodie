@@ -3,6 +3,7 @@
 .env.local
 .env.*.local
 .eas-token
+.github-token
 
 # Dependencies
 node_modules/
