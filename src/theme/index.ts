@@ -14,6 +14,7 @@ export const colors = {
   do: '#3FD1B9',
   craft: '#FFC857',
   info: '#5BA9FF',
+  now: '#FF5DA8',
   success: '#3FD1B9',
   warning: '#FFC857',
   danger: '#FF5470',

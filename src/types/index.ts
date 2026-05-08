@@ -61,6 +61,56 @@ export interface CityContent {
   doPlaces: CuratedPlace[];
   craftPages: ContentPage[];
   infoPages: ContentPage[];
+  nowContent?: NowContent;
+}
+
+export interface NowSchedule {
+  when: string;
+  activity: string;
+  place?: string;
+  why: string;
+}
+
+export interface NowNewsTheme {
+  title: string;
+  summary: string;
+}
+
+export interface NowSong {
+  title: string;
+  artist: string;
+  spotifyUrl: string;
+}
+
+export interface NowVideo {
+  title: string;
+  query: string;
+  youtubeUrl: string;
+}
+
+export interface NowContent {
+  generatedAt: number;
+  cityName: string;
+  slogan: string;
+  bigPicture: string;
+  newsThemes: NowNewsTheme[];
+  schedule: NowSchedule[];
+  song: NowSong;
+  video: NowVideo;
+  wikiTitle: string;
+  wikiUrl: string;
+  imageQueries: string[];
+  weather?: {
+    tempC: number;
+    weatherCode: number;
+    summary: string;
+  };
+  forecast?: Array<{
+    weekday: string;
+    highC: number;
+    lowC: number;
+    weatherCode: number;
+  }>;
 }
 
 export interface Coords {

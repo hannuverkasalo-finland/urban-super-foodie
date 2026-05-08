@@ -1,4 +1,11 @@
-import type { ContentPage, UserPreferences } from '../types';
+import type {
+  ContentPage,
+  NowContent,
+  UserPreferences,
+  UserProfile,
+} from '../types';
+import type { WeatherSnapshot } from './openMeteo';
+import { describeWeather } from './openMeteo';
 import {
   DO_SOURCES,
   DRINK_SOURCES,
@@ -245,4 +252,148 @@ Output ONLY the JSON array.`;
   const raw = await callClaude(system, user, 4000, 'claude.info');
   const pages = extractJson<ContentPage[]>(raw, 'parse.info');
   return pages.slice(0, 3);
+}
+
+interface NowGen {
+  slogan: string;
+  bigPicture: string;
+  newsThemes: Array<{ title: string; summary: string }>;
+  schedule: Array<{
+    when: string;
+    activity: string;
+    place?: string;
+    why: string;
+  }>;
+  song: { title: string; artist: string };
+  video: { title: string; query: string };
+  wikiTitle: string;
+  imageQueries: string[];
+}
+
+function spotifySearchUrl(title: string, artist: string): string {
+  return `https://open.spotify.com/search/${encodeURIComponent(`${title} ${artist}`)}`;
+}
+
+function youtubeSearchUrl(query: string): string {
+  return `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+}
+
+function wikiUrl(title: string): string {
+  return `https://en.wikipedia.org/wiki/${encodeURIComponent(title.trim().replace(/ /g, '_'))}`;
+}
+
+function profileBlock(profile: UserProfile): string {
+  const age = profile.birthYear
+    ? new Date().getFullYear() - profile.birthYear
+    : null;
+  const parts: string[] = [];
+  if (profile.nickname) parts.push(`Nickname: ${profile.nickname}`);
+  if (age) parts.push(`Age: ${age}`);
+  if (profile.gender) parts.push(`Gender: ${profile.gender}`);
+  if (profile.language) parts.push(`Language: ${profile.language}`);
+  return parts.length ? parts.join(' · ') : 'Anonymous traveler';
+}
+
+export async function generateNowContent(
+  cityName: string,
+  countryName: string,
+  profile: UserProfile,
+  prefs: UserPreferences,
+  weather: WeatherSnapshot | null,
+  now: Date = new Date()
+): Promise<NowContent> {
+  const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][now.getDay()];
+  const dateLabel = now.toISOString().slice(0, 10);
+  const hour = now.getHours();
+  const partOfDay =
+    hour < 5
+      ? 'late night'
+      : hour < 12
+      ? 'morning'
+      : hour < 17
+      ? 'afternoon'
+      : hour < 21
+      ? 'evening'
+      : 'night';
+
+  const weatherText = weather
+    ? `${describeWeather(weather.current.weatherCode).emoji} ${weather.current.tempC}°C, ${describeWeather(weather.current.weatherCode).label}, wind ${weather.current.windKph} km/h, humidity ${weather.current.humidity}%. Forecast next 3 days: ${weather.daily
+        .slice(1, 4)
+        .map(
+          (d) =>
+            `${d.weekday} ${d.lowC}-${d.highC}°C ${describeWeather(d.weatherCode).emoji}`
+        )
+        .join(', ')}.`
+    : 'Weather data unavailable';
+
+  const system = `You are a brilliantly witty, slightly cheeky, deeply knowledgeable local concierge AI. Your job: read this user's profile and generate a hyper-personalised, contextual, hilarious-but-useful "right now" snapshot for the city they're in. Use real venues that exist on Google Maps. Be specific. Be funny. Be warm. Drop lyrical references and inside jokes only a real local would know. Output JSON only — no preamble, no markdown.`;
+
+  const user = `City: ${cityName}, ${countryName}
+Local time: ${dayName} ${dateLabel}, ${partOfDay} (${now.toLocaleTimeString()})
+Weather: ${weatherText}
+
+User:
+${profileBlock(profile)}
+Food preferences: ${prefs.foodStyles.join(', ') || 'open to anything'}
+Drink preferences: ${prefs.drinkStyles.join(', ') || 'open to anything'}
+Activity preferences: ${prefs.activityTypes.join(', ') || 'open to anything'}
+${prefs.foodFreeText ? 'Food notes: ' + prefs.foodFreeText : ''}
+${prefs.drinkFreeText ? 'Drink notes: ' + prefs.drinkFreeText : ''}
+
+Generate a richly contextual "Now" briefing. Output ONLY this JSON shape, nothing else:
+
+{
+  "slogan": "8-12 word punchy, witty tagline for THIS specific moment of THIS user being in THIS city. Reference the weather, day, and one of the user's preferences. Be funny.",
+  "bigPicture": "2-3 conversational paragraphs (~150 words total) summarising what's happening in ${cityName} right now — major themes locals are talking about this week, mood of the city, what makes this exact day/hour special. Conversational tone, drop in 1-2 jokes, address the user by nickname. Mix in a cheeky reference to their preferences.",
+  "newsThemes": [
+    { "title": "Sharp 5-7 word headline", "summary": "1-2 sentence punchy take" }
+  ] (provide exactly 4 — current local conversations: politics, culture, sports/events, food&drink scene),
+  "schedule": [
+    { "when": "label like 'Right now', '11:00', 'Lunch', 'Late afternoon', 'Evening drink', 'Dinner', 'Late night'", "activity": "what to do (verb-led)", "place": "specific real venue name in ${cityName}", "why": "why THIS user would love it (reference preferences/weather)" }
+  ] (provide exactly 10 entries spanning the next 12-24 hours, ordered chronologically. Mix eats, drinks, activities, walks, viewpoints. Real venues only.),
+  "song": { "title": "Real song title that fits ${cityName} vibe + user taste", "artist": "Real artist" },
+  "video": { "title": "Compelling YouTube title (real or representative)", "query": "search query that will return a great video" },
+  "wikiTitle": "Wikipedia article title most relevant for context (city itself, or a specific neighborhood / dish / scene)",
+  "imageQueries": ["3 short image search queries for evocative photos: e.g., 'skopje old bazaar dusk', 'macedonian ajvar', 'vardar river'"]
+}
+
+Be unapologetically witty. Reference user's age, gender, language background where relevant. Make the schedule feel like a real day. Output ONLY the JSON.`;
+
+  const raw = await callClaude(system, user, 4500, 'claude.now');
+  const gen = extractJson<NowGen>(raw, 'parse.now');
+
+  return {
+    generatedAt: Date.now(),
+    cityName,
+    slogan: gen.slogan,
+    bigPicture: gen.bigPicture,
+    newsThemes: gen.newsThemes ?? [],
+    schedule: gen.schedule ?? [],
+    song: {
+      title: gen.song?.title ?? '',
+      artist: gen.song?.artist ?? '',
+      spotifyUrl: spotifySearchUrl(gen.song?.title ?? '', gen.song?.artist ?? ''),
+    },
+    video: {
+      title: gen.video?.title ?? '',
+      query: gen.video?.query ?? cityName,
+      youtubeUrl: youtubeSearchUrl(gen.video?.query ?? cityName),
+    },
+    wikiTitle: gen.wikiTitle ?? cityName,
+    wikiUrl: wikiUrl(gen.wikiTitle ?? cityName),
+    imageQueries: gen.imageQueries ?? [],
+    weather: weather
+      ? {
+          tempC: weather.current.tempC,
+          weatherCode: weather.current.weatherCode,
+          summary: describeWeather(weather.current.weatherCode).label,
+        }
+      : undefined,
+    forecast: weather?.daily.slice(0, 4).map((d) => ({
+      weekday: d.weekday,
+      highC: d.highC,
+      lowC: d.lowC,
+      weatherCode: d.weatherCode,
+    })),
+  };
 }

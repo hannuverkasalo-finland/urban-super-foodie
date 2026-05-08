@@ -4,26 +4,29 @@ import CraftScreen from '../screens/CraftScreen';
 import InfoScreen from '../screens/InfoScreen';
 import MapScreen from '../screens/MapScreen';
 import MeScreen from '../screens/MeScreen';
+import NowScreen from '../screens/NowScreen';
 import { colors, typography } from '../theme';
 
 const Tab = createBottomTabNavigator();
 
 const TAB_GLYPHS: Record<string, string> = {
   Me: '◉',
+  Now: '⚡',
   Eat: '🍽',
   Drink: '🥂',
   Do: '✦',
   Craft: '✺',
-  Info: 'ⓘ',
+  Place: 'ⓘ',
 };
 
 const TAB_COLORS: Record<string, string> = {
   Me: colors.accent,
+  Now: colors.now,
   Eat: colors.eat,
   Drink: colors.drink,
   Do: colors.do,
   Craft: colors.craft,
-  Info: colors.info,
+  Place: colors.info,
 };
 
 function makeIcon(routeName: string) {
@@ -54,7 +57,7 @@ export default function TabNavigator() {
         tabBarShowLabel: true,
         tabBarLabelStyle: {
           ...typography.micro,
-          fontSize: 10,
+          fontSize: 9,
         },
         tabBarStyle: {
           backgroundColor: colors.bgElevated,
@@ -64,17 +67,19 @@ export default function TabNavigator() {
           paddingTop: 6,
           paddingBottom: 8,
         },
+        tabBarItemStyle: { paddingHorizontal: 0 },
         tabBarActiveTintColor: TAB_COLORS[route.name] ?? colors.accent,
         tabBarInactiveTintColor: colors.textDim,
         tabBarIcon: makeIcon(route.name),
       })}
     >
       <Tab.Screen name="Me" component={MeScreen} />
+      <Tab.Screen name="Now" component={NowScreen} />
       <Tab.Screen name="Eat" component={EatScreen} />
       <Tab.Screen name="Drink" component={DrinkScreen} />
       <Tab.Screen name="Do" component={DoScreen} />
       <Tab.Screen name="Craft" component={CraftScreen} />
-      <Tab.Screen name="Info" component={InfoScreen} />
+      <Tab.Screen name="Place" component={InfoScreen} />
     </Tab.Navigator>
   );
 }

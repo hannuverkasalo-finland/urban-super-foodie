@@ -16,7 +16,7 @@ import { useContentStore } from '../store/contentStore';
 import { useLocationStore } from '../store/locationStore';
 import { useUserStore } from '../store/userStore';
 import { cityKeyFor, prefetchCity } from '../services/prefetchService';
-import { colors, mapNightStyle, radius, spacing, typography } from '../theme';
+import { colors, radius, spacing, typography } from '../theme';
 import type { CuratedPlace, PlaceCategory } from '../types';
 import { haversineKm } from '../utils/distance';
 
@@ -232,12 +232,13 @@ export default function MapScreen({ category }: Props) {
         <MapView
           ref={mapRef}
           style={StyleSheet.absoluteFill}
-          customMapStyle={mapNightStyle}
           initialRegion={initialRegionFor(city, coords)}
           onRegionChangeComplete={setRegion}
           showsUserLocation={permission === 'granted'}
           showsMyLocationButton={false}
           showsPointsOfInterest={false}
+          showsBuildings={false}
+          showsIndoors={false}
           toolbarEnabled={false}
         >
           {coords && (
@@ -247,7 +248,7 @@ export default function MapScreen({ category }: Props) {
                 longitude: coords.lng,
               }}
               anchor={{ x: 0.5, y: 0.5 }}
-              tracksViewChanges={false}
+              tracksViewChanges={true}
             >
               <View style={styles.userDotOuter}>
                 <View style={styles.userDotInner} />
@@ -260,7 +261,7 @@ export default function MapScreen({ category }: Props) {
               coordinate={{ latitude: p.lat, longitude: p.lng }}
               anchor={{ x: 0.5, y: 0.5 }}
               onPress={() => focusPlace(p, i)}
-              tracksViewChanges={false}
+              tracksViewChanges={true}
             >
               <MapMarker
                 rank={i + 1}

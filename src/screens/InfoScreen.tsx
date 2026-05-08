@@ -29,7 +29,7 @@ export default function InfoScreen() {
     return (
       <SafeAreaView style={styles.root} edges={['top']}>
         <View style={styles.center}>
-          <Text style={styles.title}>Info</Text>
+          <Text style={styles.title}>Place</Text>
           <Text style={styles.empty}>
             Pick a city to learn what makes it special.
           </Text>
@@ -42,7 +42,7 @@ export default function InfoScreen() {
     return (
       <SafeAreaView style={styles.root} edges={['top']}>
         <View style={styles.header}>
-          <Text style={styles.title}>Info</Text>
+          <Text style={styles.title}>Place</Text>
           <Text style={styles.subtitle}>{city.name}</Text>
         </View>
         <LoadingState message={`Reading up on ${city.name}…`} />
@@ -53,7 +53,7 @@ export default function InfoScreen() {
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
-        <Text style={styles.title}>Info</Text>
+        <Text style={styles.title}>Place</Text>
         <Text style={styles.subtitle}>{city.name} essentials</Text>
       </View>
       <ContentPager pages={content.infoPages} fallbackAccent={colors.info} />

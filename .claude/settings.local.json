@@ -22,7 +22,14 @@
       "Bash(git -c user.name=\"USF Build\" -c user.email=\"build@local\" commit -q -m \"Initial Urban Super Foodie project\")",
       "Bash(node -e \"const d=JSON.parse\\(require\\('fs'\\).readFileSync\\(0,'utf8'\\)\\); console.log\\('status:', d.status, '| platform:', d.platform, '| profile:', d.buildProfile\\)\")",
       "Bash(git -c user.name=\"USF Build\" -c user.email=\"build@local\" commit -q -m \"Add DebugPanel, INTERNET permission, photo error surfacing\")",
-      "Bash(git -c user.name=\"USF Build\" -c user.email=\"build@local\" commit -q -m \"v0.1.2: prefetch debug logging, cache content view, photo cropper fix, locality-preferring reverse-geocode\")"
+      "Bash(git -c user.name=\"USF Build\" -c user.email=\"build@local\" commit -q -m \"v0.1.2: prefetch debug logging, cache content view, photo cropper fix, locality-preferring reverse-geocode\")",
+      "Bash(gh --version)",
+      "Bash(git -c user.name=\"USF Build\" -c user.email=\"build@local\" commit -q -m \"Gitignore .github-token\")",
+      "Bash(git remote *)",
+      "Bash(node -e \"const d=JSON.parse\\(require\\('fs'\\).readFileSync\\(0,'utf8'\\)\\); console.log\\('name:', d.name\\); console.log\\('private:', d.private\\); console.log\\('default_branch:', d.default_branch\\); console.log\\('html_url:', d.html_url\\); console.log\\('size_kb:', d.size\\); console.log\\('latest_push:', d.pushed_at\\)\")",
+      "Bash(git -c 'http.extraHeader=Authorization: token __TRACKED_VAR__' fetch origin)",
+      "Bash(git branch *)",
+      "Bash(git -c user.name=\"USF Build\" -c user.email=\"build@local\" commit -q -m \"v0.1.3: install expo-file-system \\(photo fix\\), bright map, visible markers, 100 places per category, Now tab with weather + Claude narrative + Spotify/YouTube/Wiki, Info renamed Place, splash with rotating city photos\")"
     ]
   }
 }

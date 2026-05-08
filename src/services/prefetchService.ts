@@ -2,17 +2,22 @@ import {
   curatePlaces,
   generateCraftContent,
   generateInfoContent,
+  generateNowContent,
   type CuratedPlaceSeed,
 } from '../api/claude';
 import { buildPhotoUrl, findPlace } from '../api/googlePlaces';
+import { fetchWeather } from '../api/openMeteo';
 import { useContentStore } from '../store/contentStore';
 import { dlog, dwarn, derror } from '../store/debugLog';
+import { useLocationStore } from '../store/locationStore';
 import { useUserStore } from '../store/userStore';
 import type {
   CityContent,
   CuratedPlace,
+  NowContent,
   PlaceCategory,
   UserPreferences,
+  UserProfile,
 } from '../types';
 
 export function cityKeyFor(name: string, country: string): string {
@@ -123,21 +128,21 @@ export async function prefetchCity(
   try {
     const t0 = Date.now();
     const seedResults = await Promise.all([
-      curatePlaces('eat', cityName, countryName, prefs, 30).catch((err) => {
+      curatePlaces('eat', cityName, countryName, prefs, 100).catch((err) => {
         dwarn(
           'prefetch',
           `curatePlaces(eat) failed: ${err instanceof Error ? err.message : String(err)}`
         );
         return [] as CuratedPlaceSeed[];
       }),
-      curatePlaces('drink', cityName, countryName, prefs, 30).catch((err) => {
+      curatePlaces('drink', cityName, countryName, prefs, 100).catch((err) => {
         dwarn(
           'prefetch',
           `curatePlaces(drink) failed: ${err instanceof Error ? err.message : String(err)}`
         );
         return [] as CuratedPlaceSeed[];
       }),
-      curatePlaces('do', cityName, countryName, prefs, 30).catch((err) => {
+      curatePlaces('do', cityName, countryName, prefs, 100).catch((err) => {
         dwarn(
           'prefetch',
           `curatePlaces(do) failed: ${err instanceof Error ? err.message : String(err)}`
@@ -186,12 +191,64 @@ export async function prefetchCity(
       `done ${key} in ${Date.now() - t0}ms: eat=${eatPlaces.length}, drink=${drinkPlaces.length}, do=${doPlaces.length}, craft=${craftPages.length}, info=${infoPages.length}`
     );
     store.storeCity(content);
+    // Kick off Now content generation in the background (non-blocking).
+    void prefetchNow(cityName, countryName);
     return content;
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Failed to fetch city';
     derror('prefetch', `failed: ${msg}`);
     store.setError(key, msg);
     store.setStatus(key, 'error');
+    return null;
+  }
+}
+
+const NOW_TTL_MS = 1000 * 60 * 30; // 30 min
+
+export async function prefetchNow(
+  cityName: string,
+  countryName: string,
+  options: { force?: boolean } = {}
+): Promise<NowContent | null> {
+  const key = cityKeyFor(cityName, countryName);
+  const store = useContentStore.getState();
+  const cached = store.cityCache[key];
+  if (!options.force && cached?.nowContent) {
+    if (Date.now() - cached.nowContent.generatedAt < NOW_TTL_MS) {
+      dlog('now', `cache hit ${key}`);
+      return cached.nowContent;
+    }
+  }
+  const profile: UserProfile = useUserStore.getState().profile;
+  const prefs = useUserStore.getState().preferences;
+  const coords = useLocationStore.getState().coords ?? {
+    lat: cached?.eatPlaces[0]?.lat ?? 0,
+    lng: cached?.eatPlaces[0]?.lng ?? 0,
+  };
+  try {
+    dlog('now', `start ${key}`);
+    const t0 = Date.now();
+    const weather = await fetchWeather(coords.lat, coords.lng);
+    const now = await generateNowContent(
+      cityName,
+      countryName,
+      profile,
+      prefs,
+      weather
+    );
+    dlog(
+      'now',
+      `done ${key} in ${Date.now() - t0}ms: ${now.schedule.length} schedule, ${now.newsThemes.length} themes`
+    );
+    if (cached) {
+      store.storeCity({ ...cached, nowContent: now });
+    }
+    return now;
+  } catch (err) {
+    dwarn(
+      'now',
+      `failed: ${err instanceof Error ? err.message : String(err)}`
+    );
     return null;
   }
 }

@@ -46,9 +46,8 @@ export default function OnboardingScreen({ onDone }: Props) {
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        quality: 0.7,
-        selectionLimit: 1,
+        mediaTypes: 'images',
+        quality: 0.6,
       });
       if (result.canceled) return;
       const uri = result.assets?.[0]?.uri;
