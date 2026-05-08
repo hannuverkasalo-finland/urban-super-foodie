@@ -103,7 +103,9 @@ export default function MapScreen({ category }: Props) {
   const [pickerVisible, setPickerVisible] = useState(false);
   const mapRef = useRef<MapView | null>(null);
   const scrollRef = useRef<ScrollView | null>(null);
-  const haveAnimatedToCity = useRef(false);
+  // Track which city key we last animated to so a city change (via picker
+  // or GPS) re-flies the camera. A boolean would block all future animations.
+  const lastAnimatedCityKey = useRef<string | null>(null);
   const haveAnimatedToCoords = useRef(false);
   const locationError = useLocationStore((s) => s.lastError);
 
@@ -120,8 +122,9 @@ export default function MapScreen({ category }: Props) {
   }, [city, cityKey, cityStatus, preferences]);
 
   useEffect(() => {
-    if (!city || haveAnimatedToCity.current) return;
-    haveAnimatedToCity.current = true;
+    if (!city || !cityKey) return;
+    if (lastAnimatedCityKey.current === cityKey) return;
+    lastAnimatedCityKey.current = cityKey;
     mapRef.current?.animateToRegion(
       {
         latitude: city.lat,
@@ -131,7 +134,7 @@ export default function MapScreen({ category }: Props) {
       },
       650
     );
-  }, [city]);
+  }, [city, cityKey]);
 
   useEffect(() => {
     if (city) return;

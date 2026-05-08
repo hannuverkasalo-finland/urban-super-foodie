@@ -9,6 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { playIntroFanfare, stopIntroFanfare } from '../services/audio';
 import { colors, typography } from '../theme';
 
 const { width, height } = Dimensions.get('window');
@@ -47,6 +48,9 @@ export default function SplashScreen({ onFinish }: Props) {
   const [activeFrame, setActiveFrame] = useState(0);
 
   useEffect(() => {
+    // Kick off the splash fanfare. Fire-and-forget; never blocks animation.
+    void playIntroFanfare();
+
     Animated.timing(bgOpacity, {
       toValue: 1,
       duration: 600,
@@ -129,6 +133,7 @@ export default function SplashScreen({ onFinish }: Props) {
     return () => {
       clearTimeout(timeout);
       clearInterval(cityInterval);
+      void stopIntroFanfare();
     };
   }, []);
 

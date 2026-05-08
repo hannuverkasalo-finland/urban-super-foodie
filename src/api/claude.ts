@@ -97,12 +97,75 @@ function extractJson<T>(raw: string, label = 'parse'): T {
   try {
     return JSON.parse(sliced) as T;
   } catch (err) {
+    // SALVAGE PATH: Claude often truncates mid-object when hitting max_tokens.
+    // Find the last complete top-level object (closing '}' followed by ',' or end-of-array)
+    // and rebuild a valid array from it.
+    const isArray = sliced.trimStart().startsWith('[');
+    if (isArray) {
+      const salvaged = salvageTruncatedArray(sliced);
+      if (salvaged) {
+        try {
+          const parsed = JSON.parse(salvaged) as T;
+          const len = Array.isArray(parsed) ? parsed.length : 0;
+          dwarn(
+            label,
+            `recovered ${len} complete entries from truncated JSON (orig ${sliced.length} chars)`
+          );
+          return parsed;
+        } catch {
+          // fall through to original error
+        }
+      }
+    }
     dwarn(
       label,
       `JSON.parse failed: ${err instanceof Error ? err.message : String(err)}; sample: ${sliced.slice(0, 200)}`
     );
     throw err;
   }
+}
+
+/**
+ * Salvage a truncated JSON array string by trimming back to the last complete
+ * top-level object and closing the array. Tracks brace depth to avoid mistaking
+ * a brace inside a nested object/string for a top-level boundary.
+ */
+function salvageTruncatedArray(text: string): string | null {
+  // Strip leading whitespace + opening '['
+  const openIdx = text.indexOf('[');
+  if (openIdx < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let lastCompleteEnd = -1; // index just after the last complete top-level '}'
+  for (let i = openIdx + 1; i < text.length; i++) {
+    const ch = text[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (inString) {
+      if (ch === '\\') escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        lastCompleteEnd = i + 1; // include this closing brace
+      }
+    } else if (ch === ']' && depth === 0) {
+      // already a complete array — caller would've parsed
+      return null;
+    }
+  }
+  if (lastCompleteEnd < 0) return null;
+  return text.slice(0, lastCompleteEnd) + ']';
 }
 
 function preferencesBlock(prefs: UserPreferences): string {
@@ -130,7 +193,8 @@ export async function curatePlaces(
   cityName: string,
   countryName: string,
   prefs: UserPreferences,
-  count = 30
+  count = 30,
+  excludeNames: string[] = []
 ): Promise<CuratedPlaceSeed[]> {
   const sources =
     category === 'eat'
@@ -151,13 +215,20 @@ export async function curatePlaces(
   const system = `You are an expert urban travel curator with deep knowledge of these reference sources:
 ${sourceList}
 
-You must produce concrete, real, currently-existing places. Never invent. Only use venues that exist on Google Maps with at least 4.0 rating and 10+ reviews to the best of your knowledge. Prioritize places mentioned in the reference sources above. Respond with valid JSON only — no preamble, no markdown.`;
+You must produce concrete, real, currently-existing places. Never invent. Only use venues that exist on Google Maps with at least 4.0 rating and 10+ reviews to the best of your knowledge. Prioritize places mentioned in the reference sources above. Respond with valid JSON only — no preamble, no markdown.
+
+CRITICAL FOR JSON COMPLETENESS: Keep each entry compact. The "why_recommended" field MUST be a single short sentence (max 25 words). The "source_inspirations" array MUST contain at most 3 source names. This ensures the response stays under the token budget. Output ONLY the JSON array, no surrounding prose.`;
+
+  const excludeBlock =
+    excludeNames.length > 0
+      ? `\n\nDO NOT include any of these venues (already covered): ${excludeNames.slice(0, 50).join(', ')}.`
+      : '';
 
   const user = `City: ${cityName}, ${countryName}
 Category: ${categoryDescription}
 
 User preferences:
-${preferencesBlock(prefs)}
+${preferencesBlock(prefs)}${excludeBlock}
 
 Task: Return the top ${count} ${categoryDescription} in ${cityName} that best match this user, ranked from #1 (most recommended) downward.
 
@@ -167,20 +238,25 @@ Output JSON only — an array of ${count} objects with this exact shape:
     "name": "exact venue name as it appears on Google Maps",
     "neighborhood": "neighborhood or district",
     "address": "approximate street address if known",
-    "why_recommended": "1-2 sentences explaining why this matches the user's preferences, citing what makes the place notable",
-    "source_inspirations": ["list of 2-4 of the reference sources above that have featured or rated this place"]
+    "why_recommended": "ONE short sentence (max 25 words) — why this matches user's preferences",
+    "source_inspirations": ["max 3 source names from the list above"]
   }
 ]
 
 Strict requirements:
 - Only real venues, currently operating
 - Spell venue names exactly so they can be matched on Google Maps
-- Reference at least one source from the list above per place where applicable
 - Order by how well it matches the user's preferences
 - Diverse mix across price points and neighborhoods
+- Keep "why_recommended" to ONE short sentence (max 25 words)
+- Keep "source_inspirations" to max 3 entries
 - Output ONLY the JSON array, nothing else.`;
 
-  const raw = await callClaude(system, user, 8000, `claude.${category}`);
+  // Token budget: ~140 chars/place compact format × count + overhead.
+  // 25 places ≈ 4000 chars (~1500 tokens) → 5000 max_tokens
+  // 100 places ≈ 16000 chars (~5500 tokens) → 12000 max_tokens
+  const maxTokens = Math.min(20000, Math.max(4000, count * 120));
+  const raw = await callClaude(system, user, maxTokens, `claude.${category}`);
   return extractJson<CuratedPlaceSeed[]>(raw, `parse.${category}`);
 }
 
