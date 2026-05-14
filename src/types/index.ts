@@ -132,3 +132,32 @@ export type LocationPermissionState =
   | 'never-asked';
 
 export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+export interface MenuItem {
+  originalName: string;
+  englishName: string;
+  description: string;
+  price: string;
+}
+
+export interface MenuSection {
+  name: string;
+  originalName: string;
+  items: MenuItem[];
+}
+
+export interface MenuRecommendation {
+  itemName: string;
+  whyForYou: string;
+  tags: string[];
+}
+
+export interface MenuAnalysis {
+  analyzedAt: number;
+  photoUri: string;
+  languageDetected: string;
+  menuTitle: string;
+  currency: string;
+  sections: MenuSection[];
+  recommendations: MenuRecommendation[];
+}

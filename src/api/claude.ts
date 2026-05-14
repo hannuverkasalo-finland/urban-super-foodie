@@ -1,5 +1,6 @@
 import type {
   ContentPage,
+  MenuAnalysis,
   NowContent,
   UserPreferences,
   UserProfile,
@@ -471,5 +472,182 @@ Be unapologetically witty. Reference user's age, gender, language background whe
       lowC: d.lowC,
       weatherCode: d.weatherCode,
     })),
+  };
+}
+
+// ============================================================
+// Menu vision analysis
+// ============================================================
+
+interface AnthropicVisionBlock {
+  type: 'image';
+  source: {
+    type: 'base64';
+    media_type: string;
+    data: string;
+  };
+}
+
+interface AnthropicTextBlock {
+  type: 'text';
+  text: string;
+}
+
+async function callClaudeWithImage(
+  systemPrompt: string,
+  userText: string,
+  imageBase64: string,
+  imageMediaType: string,
+  maxTokens: number,
+  label: string
+): Promise<string> {
+  if (!API_KEY) throw new Error('Missing EXPO_PUBLIC_ANTHROPIC_API_KEY');
+  const t0 = Date.now();
+  const body = {
+    model: MODEL,
+    max_tokens: maxTokens,
+    system: systemPrompt,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: imageMediaType,
+              data: imageBase64,
+            },
+          } as AnthropicVisionBlock,
+          { type: 'text', text: userText } as AnthropicTextBlock,
+        ],
+      },
+    ],
+  };
+  const res = await fetch(ANTHROPIC_URL, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': API_KEY,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    dwarn(label, `HTTP ${res.status}: ${errText.slice(0, 200)}`);
+    throw new Error(`Claude ${res.status}: ${errText.slice(0, 300)}`);
+  }
+  const data: AnthropicResponse = await res.json();
+  const text = data.content
+    .filter((c) => c.type === 'text')
+    .map((c) => c.text ?? '')
+    .join('\n')
+    .trim();
+  if (!text) {
+    dwarn(label, 'empty response');
+    throw new Error('Empty Claude response');
+  }
+  dlog(
+    label,
+    `${Date.now() - t0}ms · ${text.length} chars · stop=${data.stop_reason ?? '?'}`
+  );
+  return text;
+}
+
+interface MenuGen {
+  languageDetected: string;
+  menuTitle: string;
+  currency: string;
+  sections: Array<{
+    name: string;
+    originalName: string;
+    items: Array<{
+      originalName: string;
+      englishName: string;
+      description: string;
+      price: string;
+    }>;
+  }>;
+  recommendations: Array<{
+    itemName: string;
+    whyForYou: string;
+    tags: string[];
+  }>;
+}
+
+export async function analyzeMenu(
+  imageBase64: string,
+  imageMediaType: string,
+  cityName: string,
+  countryName: string,
+  prefs: UserPreferences,
+  photoUri: string
+): Promise<MenuAnalysis> {
+  const system = `You are an expert sommelier, food critic, and translator. You are looking at a photo of a menu (food, drinks, wines, or cocktails) from a venue in ${cityName}, ${countryName}.
+
+Your job:
+1. Identify the menu language.
+2. Transcribe and translate every item to English, preserving the menu structure (sections), with prices.
+3. Pick 4-6 standout recommendations based on the user's preferences below. PRIORITIZE local specialties and regional/seasonal items — use the user's preferences to break ties. Never invent items not on the menu.
+
+Respond with valid JSON only — no preamble, no markdown.`;
+
+  const userText = `User preferences:
+${preferencesBlock(prefs)}
+
+Analyse the menu in the attached image. Output ONLY this JSON shape (no other text):
+
+{
+  "languageDetected": "language name",
+  "menuTitle": "venue name if visible, else 'Menu'",
+  "currency": "currency symbol or code (e.g. €, $, ден, ¥) — best guess if not stated",
+  "sections": [
+    {
+      "name": "Section name in English (e.g. 'Starters', 'Main Courses', 'Wines by the Glass')",
+      "originalName": "Section name as it appears on the menu",
+      "items": [
+        {
+          "originalName": "item name exactly as printed",
+          "englishName": "concise English translation",
+          "description": "translated description (or empty string if not on menu)",
+          "price": "price with currency, e.g. '€18' or '350 ден' — empty string if unknown"
+        }
+      ]
+    }
+  ],
+  "recommendations": [
+    {
+      "itemName": "the originalName of the chosen item, exactly as in the menu",
+      "whyForYou": "1-2 sentences. Cite the user's preferences. Note if it is a local specialty.",
+      "tags": ["short labels e.g. 'local specialty', 'matches: raw seafood', 'natural wine']
+    }
+  ]
+}
+
+Rules:
+- Transcribe ONLY what's visible on the menu — do not invent items, sections, or prices.
+- Keep the JSON compact. Each description ≤ 25 words. Each whyForYou ≤ 30 words.
+- Pick 4-6 recommendations total, ranked best-first.
+- If the menu is mostly drinks, recommend drinks; if food, food; if mixed, balance.
+- Output ONLY the JSON object.`;
+
+  const raw = await callClaudeWithImage(
+    system,
+    userText,
+    imageBase64,
+    imageMediaType,
+    8000,
+    'claude.menu'
+  );
+  const gen = extractJson<MenuGen>(raw, 'parse.menu');
+  return {
+    analyzedAt: Date.now(),
+    photoUri,
+    languageDetected: gen.languageDetected ?? 'Unknown',
+    menuTitle: gen.menuTitle ?? 'Menu',
+    currency: gen.currency ?? '',
+    sections: gen.sections ?? [],
+    recommendations: gen.recommendations ?? [],
   };
 }

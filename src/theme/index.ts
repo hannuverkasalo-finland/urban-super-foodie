@@ -15,6 +15,7 @@ export const colors = {
   craft: '#FFC857',
   info: '#5BA9FF',
   now: '#FF5DA8',
+  menu: '#9FE870',
   success: '#3FD1B9',
   warning: '#FFC857',
   danger: '#FF5470',

@@ -4,6 +4,7 @@ import CraftScreen from '../screens/CraftScreen';
 import InfoScreen from '../screens/InfoScreen';
 import MapScreen from '../screens/MapScreen';
 import MeScreen from '../screens/MeScreen';
+import MenuScreen from '../screens/MenuScreen';
 import NowScreen from '../screens/NowScreen';
 import { colors, typography } from '../theme';
 
@@ -14,6 +15,7 @@ const TAB_GLYPHS: Record<string, string> = {
   Now: '⚡',
   Eat: '🍽',
   Drink: '🥂',
+  Menu: '📷',
   Do: '✦',
   Craft: '✺',
   Place: 'ⓘ',
@@ -24,6 +26,7 @@ const TAB_COLORS: Record<string, string> = {
   Now: colors.now,
   Eat: colors.eat,
   Drink: colors.drink,
+  Menu: colors.menu,
   Do: colors.do,
   Craft: colors.craft,
   Place: colors.info,
@@ -77,6 +80,7 @@ export default function TabNavigator() {
       <Tab.Screen name="Now" component={NowScreen} />
       <Tab.Screen name="Eat" component={EatScreen} />
       <Tab.Screen name="Drink" component={DrinkScreen} />
+      <Tab.Screen name="Menu" component={MenuScreen} />
       <Tab.Screen name="Do" component={DoScreen} />
       <Tab.Screen name="Craft" component={CraftScreen} />
       <Tab.Screen name="Place" component={InfoScreen} />

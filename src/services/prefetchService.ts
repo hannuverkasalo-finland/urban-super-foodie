@@ -26,18 +26,22 @@ export function cityKeyFor(name: string, country: string): string {
     .replace(/\s+/g, '-')}`;
 }
 
-const PHASE1_COUNT = 25;
-const PHASE2_TARGET = 100;
+const PHASE1_COUNT = 10; // ~5-10s target for first content
+const PHASE2_TARGET = 30; // ~30-45s total
+const PHASE3_TARGET = 100; // ~2-3min total
 
-// Track in-flight phase 2 jobs so we don't double-fire when MapScreen re-mounts.
+// Track in-flight phase jobs so re-entry (tab nav, app-state changes, etc.)
+// doesn't kick off duplicate work.
 const phase2InFlight = new Set<string>();
+const phase3InFlight = new Set<string>();
+const nowInFlight = new Set<string>();
 
 async function enrichSeeds(
   seeds: CuratedPlaceSeed[],
   category: PlaceCategory,
   cityName: string,
   countryName: string,
-  startRank: number = 1
+  startRank: number
 ): Promise<CuratedPlace[]> {
   const cityHint = `${cityName}, ${countryName}`;
   const enriched: CuratedPlace[] = [];
@@ -103,18 +107,14 @@ async function enrichSeeds(
   return enriched;
 }
 
-/**
- * Run a curate+enrich cycle for one category, returning enriched places.
- * Each step is wrapped so any single failure returns [] without throwing.
- */
 async function curateAndEnrich(
   category: PlaceCategory,
   cityName: string,
   countryName: string,
   prefs: UserPreferences,
   count: number,
-  excludeNames: string[] = [],
-  startRank: number = 1
+  excludeNames: string[],
+  startRank: number
 ): Promise<CuratedPlace[]> {
   let seeds: CuratedPlaceSeed[] = [];
   try {
@@ -137,6 +137,26 @@ async function curateAndEnrich(
   return enrichSeeds(seeds, category, cityName, countryName, startRank);
 }
 
+function placesField(category: PlaceCategory) {
+  return category === 'eat'
+    ? 'eatPlaces'
+    : category === 'drink'
+    ? 'drinkPlaces'
+    : ('doPlaces' as const);
+}
+
+/**
+ * Public entry point. Idempotent and progressive: phases store as soon as
+ * they have data, so each Claude call's result appears in the UI immediately.
+ *
+ * Phase 1 (~5-10s): 10 places per eat/drink/do, in parallel. Stored together.
+ * Phase 2 (~30-45s total): expand each category to 30; full craft, info, now
+ *   pages — all in parallel. Each result is appended/set as soon as it lands.
+ * Phase 3 (~2-3min total): expand each category to 100 in parallel. Same
+ *   append-as-ready behaviour.
+ *
+ * Re-entry is safe: in-flight jobs are deduped per cityKey.
+ */
 export async function prefetchCity(
   cityName: string,
   countryName: string,
@@ -151,18 +171,15 @@ export async function prefetchCity(
     if (fresh) {
       dlog(
         'prefetch',
-        `cache hit ${key}: eat=${fresh.eatPlaces.length}, drink=${fresh.drinkPlaces.length}, do=${fresh.doPlaces.length}, craft=${fresh.craftPages.length}, info=${fresh.infoPages.length}`
+        `cache hit ${key}: eat=${fresh.eatPlaces.length}, drink=${fresh.drinkPlaces.length}, do=${fresh.doPlaces.length}, craft=${fresh.craftPages.length}, info=${fresh.infoPages.length}, now=${fresh.nowContent ? 'yes' : 'no'}`
       );
-      // Even on a cache hit, top up if we're below target — could happen if
-      // a previous phase 2 was interrupted.
-      if (
-        fresh.eatPlaces.length < PHASE2_TARGET ||
-        fresh.drinkPlaces.length < PHASE2_TARGET ||
-        fresh.doPlaces.length < PHASE2_TARGET
-      ) {
+      // Top up if any phase didn't complete in a prior session.
+      if (fresh.eatPlaces.length < PHASE2_TARGET) {
         void runPhase2(cityName, countryName, prefs, fresh);
+      } else if (fresh.eatPlaces.length < PHASE3_TARGET) {
+        void runPhase3(cityName, countryName, prefs, fresh);
       }
-      // Always refresh Now in the background — it's time-sensitive (weather, news).
+      // Now content is time-sensitive — always refresh in the background.
       void prefetchNow(cityName, countryName);
       return fresh;
     }
@@ -173,68 +190,47 @@ export async function prefetchCity(
     return null;
   }
 
-  dlog(
-    'prefetch',
-    `start phase1 ${key} (force=${!!options.force}, count=${PHASE1_COUNT})`
-  );
   store.setStatus(key, 'loading');
   store.setError(key, null);
 
-  // Phase 1: a small fast batch + craft + info, all in parallel, all
-  // independently catching their own errors so no single failure cascades.
+  // =========== PHASE 1: 10 places per category in parallel ===========
+  dlog('prefetch', `start phase1 ${key} (count=${PHASE1_COUNT})`);
   const t0 = Date.now();
-  const [eatPlaces, drinkPlaces, doPlaces, craftPages, infoPages] =
-    await Promise.all([
-      curateAndEnrich('eat', cityName, countryName, prefs, PHASE1_COUNT),
-      curateAndEnrich('drink', cityName, countryName, prefs, PHASE1_COUNT),
-      curateAndEnrich('do', cityName, countryName, prefs, PHASE1_COUNT),
-      generateCraftContent(cityName, countryName, prefs).catch((err) => {
-        dwarn(
-          'prefetch',
-          `craft failed: ${err instanceof Error ? err.message : String(err)}`
-        );
-        return [];
-      }),
-      generateInfoContent(cityName, countryName).catch((err) => {
-        dwarn(
-          'prefetch',
-          `info failed: ${err instanceof Error ? err.message : String(err)}`
-        );
-        return [];
-      }),
-    ]);
+  const [eat1, drink1, do1] = await Promise.all([
+    curateAndEnrich('eat', cityName, countryName, prefs, PHASE1_COUNT, [], 1),
+    curateAndEnrich('drink', cityName, countryName, prefs, PHASE1_COUNT, [], 1),
+    curateAndEnrich('do', cityName, countryName, prefs, PHASE1_COUNT, [], 1),
+  ]);
   dlog(
     'prefetch',
-    `phase1 done ${key} in ${Date.now() - t0}ms: eat=${eatPlaces.length}, drink=${drinkPlaces.length}, do=${doPlaces.length}, craft=${craftPages.length}, info=${infoPages.length}`
+    `phase1 done ${key} in ${Date.now() - t0}ms: eat=${eat1.length}, drink=${drink1.length}, do=${do1.length}`
   );
 
-  // Always store, even if some categories returned 0 — UI will surface
-  // partial state and the user sees whatever did succeed.
   const content: CityContent = {
     cityKey: key,
     cityDisplayName: `${cityName}, ${countryName}`,
     fetchedAt: Date.now(),
-    eatPlaces,
-    drinkPlaces,
-    doPlaces,
-    craftPages,
-    infoPages,
+    eatPlaces: eat1,
+    drinkPlaces: drink1,
+    doPlaces: do1,
+    craftPages: [],
+    infoPages: [],
   };
   store.storeCity(content);
 
-  // Phase 2 in background: expand each category up to PHASE2_TARGET total.
+  // Phase 2 + Now content kicked off in the background — fire-and-forget.
+  // Each subsystem appends/sets its own results as it lands, so the UI
+  // surfaces them without waiting for the slowest call.
   void runPhase2(cityName, countryName, prefs, content);
-  // Now content also kicked off in background.
   void prefetchNow(cityName, countryName);
 
   return content;
 }
 
 /**
- * Phase 2: expand each category up to PHASE2_TARGET, excluding what we
- * already have. Independent per-category; one failure doesn't block the
- * others. Appends incrementally so the UI can render new markers as they
- * arrive.
+ * Phase 2: bring each category up to PHASE2_TARGET, plus generate craft and
+ * info pages. All in parallel; each result appended/set as soon as it's
+ * ready. After phase 2 completes, kicks off phase 3.
  */
 async function runPhase2(
   cityName: string,
@@ -248,55 +244,80 @@ async function runPhase2(
     return;
   }
   phase2InFlight.add(key);
-  try {
-    const t0 = Date.now();
-    dlog(
-      'prefetch',
-      `start phase2 ${key} (current: eat=${current.eatPlaces.length}, drink=${current.drinkPlaces.length}, do=${current.doPlaces.length})`
+  const t0 = Date.now();
+  dlog(
+    'prefetch',
+    `start phase2 ${key} (current: eat=${current.eatPlaces.length}, drink=${current.drinkPlaces.length}, do=${current.doPlaces.length})`
+  );
+
+  const expandAndAppend = async (
+    category: PlaceCategory,
+    existing: CuratedPlace[]
+  ): Promise<void> => {
+    const remaining = PHASE2_TARGET - existing.length;
+    if (remaining <= 0) return;
+    const excludeNames = existing.map((p) => p.name);
+    const more = await curateAndEnrich(
+      category,
+      cityName,
+      countryName,
+      prefs,
+      remaining,
+      excludeNames,
+      existing.length + 1
     );
-
-    const expandCategory = async (
-      category: PlaceCategory,
-      existing: CuratedPlace[]
-    ): Promise<CuratedPlace[]> => {
-      const remaining = PHASE2_TARGET - existing.length;
-      if (remaining <= 0) return [];
-      const excludeNames = existing.map((p) => p.name);
-      const more = await curateAndEnrich(
-        category,
-        cityName,
-        countryName,
-        prefs,
-        remaining,
-        excludeNames,
-        existing.length + 1
+    if (more.length > 0) {
+      useContentStore
+        .getState()
+        .appendCityPlaces(key, { [placesField(category)]: more });
+      dlog(
+        'prefetch',
+        `phase2 appended ${more.length} ${category} places to ${key}`
       );
-      // Stream this category's results as soon as they're ready.
-      if (more.length > 0) {
-        useContentStore.getState().appendCityPlaces(key, {
-          [category === 'eat'
-            ? 'eatPlaces'
-            : category === 'drink'
-            ? 'drinkPlaces'
-            : 'doPlaces']: more,
-        });
-        dlog(
-          'prefetch',
-          `phase2 appended ${more.length} ${category} places to ${key}`
-        );
-      }
-      return more;
-    };
+    }
+  };
 
-    // Run the three category expansions in parallel; any single failure
-    // doesn't kill the others (curateAndEnrich already swallows its own).
+  const craftAndStore = async (): Promise<void> => {
+    try {
+      const pages = await generateCraftContent(cityName, countryName, prefs);
+      useContentStore.getState().setCityPages(key, { craftPages: pages });
+      dlog('prefetch', `phase2 craft ${pages.length} pages stored for ${key}`);
+    } catch (err) {
+      dwarn(
+        'prefetch',
+        `craft failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  };
+
+  const infoAndStore = async (): Promise<void> => {
+    try {
+      const pages = await generateInfoContent(cityName, countryName);
+      useContentStore.getState().setCityPages(key, { infoPages: pages });
+      dlog('prefetch', `phase2 info ${pages.length} pages stored for ${key}`);
+    } catch (err) {
+      dwarn(
+        'prefetch',
+        `info failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  };
+
+  try {
     await Promise.all([
-      expandCategory('eat', current.eatPlaces),
-      expandCategory('drink', current.drinkPlaces),
-      expandCategory('do', current.doPlaces),
+      expandAndAppend('eat', current.eatPlaces),
+      expandAndAppend('drink', current.drinkPlaces),
+      expandAndAppend('do', current.doPlaces),
+      craftAndStore(),
+      infoAndStore(),
     ]);
-
     dlog('prefetch', `phase2 done ${key} in ${Date.now() - t0}ms`);
+
+    // Phase 3 — expand to 100 in the background.
+    const updated = useContentStore.getState().cityCache[key];
+    if (updated) {
+      void runPhase3(cityName, countryName, prefs, updated);
+    }
   } catch (err) {
     derror(
       'prefetch',
@@ -304,6 +325,75 @@ async function runPhase2(
     );
   } finally {
     phase2InFlight.delete(key);
+  }
+}
+
+/**
+ * Phase 3: expand each category to PHASE3_TARGET. The biggest call per
+ * category and the slowest — runs purely in the background.
+ */
+async function runPhase3(
+  cityName: string,
+  countryName: string,
+  prefs: UserPreferences,
+  current: CityContent
+): Promise<void> {
+  const key = current.cityKey;
+  if (phase3InFlight.has(key)) {
+    dlog('prefetch', `phase3 already in flight ${key}`);
+    return;
+  }
+  phase3InFlight.add(key);
+  const t0 = Date.now();
+  dlog(
+    'prefetch',
+    `start phase3 ${key} (current: eat=${current.eatPlaces.length}, drink=${current.drinkPlaces.length}, do=${current.doPlaces.length})`
+  );
+
+  const expandAndAppend = async (
+    category: PlaceCategory,
+    existing: CuratedPlace[]
+  ): Promise<void> => {
+    const remaining = PHASE3_TARGET - existing.length;
+    if (remaining <= 0) return;
+    const excludeNames = existing.map((p) => p.name);
+    const more = await curateAndEnrich(
+      category,
+      cityName,
+      countryName,
+      prefs,
+      remaining,
+      excludeNames,
+      existing.length + 1
+    );
+    if (more.length > 0) {
+      useContentStore
+        .getState()
+        .appendCityPlaces(key, { [placesField(category)]: more });
+      dlog(
+        'prefetch',
+        `phase3 appended ${more.length} ${category} places to ${key}`
+      );
+    }
+  };
+
+  try {
+    // Read latest current state when starting each category so phase 2
+    // top-ups are reflected.
+    const latest = useContentStore.getState().cityCache[key] ?? current;
+    await Promise.all([
+      expandAndAppend('eat', latest.eatPlaces),
+      expandAndAppend('drink', latest.drinkPlaces),
+      expandAndAppend('do', latest.doPlaces),
+    ]);
+    dlog('prefetch', `phase3 done ${key} in ${Date.now() - t0}ms`);
+  } catch (err) {
+    derror(
+      'prefetch',
+      `phase3 unexpected error: ${err instanceof Error ? err.message : String(err)}`
+    );
+  } finally {
+    phase3InFlight.delete(key);
   }
 }
 
@@ -315,6 +405,10 @@ export async function prefetchNow(
   options: { force?: boolean } = {}
 ): Promise<NowContent | null> {
   const key = cityKeyFor(cityName, countryName);
+  if (nowInFlight.has(key)) {
+    dlog('now', `already in flight ${key}`);
+    return null;
+  }
   const store = useContentStore.getState();
   const cached = store.cityCache[key];
   if (!options.force && cached?.nowContent) {
@@ -323,6 +417,7 @@ export async function prefetchNow(
       return cached.nowContent;
     }
   }
+  nowInFlight.add(key);
   const profile: UserProfile = useUserStore.getState().profile;
   const prefs = useUserStore.getState().preferences;
   const coords = useLocationStore.getState().coords ?? {
@@ -333,7 +428,10 @@ export async function prefetchNow(
     dlog('now', `start ${key}`);
     const t0 = Date.now();
     const weather = await fetchWeather(coords.lat, coords.lng).catch((err) => {
-      dwarn('now', `weather failed: ${err instanceof Error ? err.message : String(err)}`);
+      dwarn(
+        'now',
+        `weather failed: ${err instanceof Error ? err.message : String(err)}`
+      );
       return null;
     });
     if (weather) {
@@ -349,14 +447,8 @@ export async function prefetchNow(
       prefs,
       weather
     );
-    const updated = store.cityCache[key];
-    if (updated) {
-      // Persist now content alongside the existing CityContent.
-      useContentStore.getState().storeCity({
-        ...updated,
-        nowContent: now,
-      });
-    }
+    // Atomic field-only update so we don't clobber concurrent phase 2/3 appends.
+    useContentStore.getState().setNowContent(key, now);
     dlog(
       'now',
       `done ${key} in ${Date.now() - t0}ms: ${now.schedule.length} schedule, ${now.newsThemes.length} themes`
@@ -368,6 +460,8 @@ export async function prefetchNow(
       `failed: ${err instanceof Error ? err.message : String(err)}`
     );
     return null;
+  } finally {
+    nowInFlight.delete(key);
   }
 }
 

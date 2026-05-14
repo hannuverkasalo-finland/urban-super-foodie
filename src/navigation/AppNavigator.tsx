@@ -13,6 +13,7 @@ import {
   startForegroundTracking,
   stopForegroundTracking,
 } from '../services/locationService';
+import { prefetchCity } from '../services/prefetchService';
 import { useLocationStore } from '../store/locationStore';
 import { useUserStore } from '../store/userStore';
 import { colors } from '../theme';
@@ -23,10 +24,19 @@ const RootStack = createNativeStackNavigator();
 export default function AppNavigator() {
   const [splashDone, setSplashDone] = useState(false);
   const hasOnboarded = useUserStore((s) => s.hasOnboarded);
+  const preferences = useUserStore((s) => s.preferences);
   const permission = useLocationStore((s) => s.permission);
   const city = useLocationStore((s) => s.city);
   const [permissionPromptShown, setPermissionPromptShown] = useState(false);
   const [cityPickerOpen, setCityPickerOpen] = useState(false);
+
+  // Eagerly start prefetch the moment we have a city + onboarding done. Doesn't
+  // wait for the user to navigate to a tab — by the time they tap Eat/Drink,
+  // phase 1's first 10 places should already be on-screen.
+  useEffect(() => {
+    if (!splashDone || !hasOnboarded || !city) return;
+    void prefetchCity(city.name, city.country, preferences);
+  }, [splashDone, hasOnboarded, city, preferences]);
 
   useEffect(() => {
     if (!splashDone) return;
