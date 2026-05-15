@@ -21,10 +21,19 @@
     },
     "production": {
       "autoIncrement": true,
-      "environment": "production"
+      "environment": "production",
+      "ios": {
+        "simulator": false
+      }
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "appleId": "hannu.verkasalo@gmail.com",
+        "appleTeamId": "QK6RANZ39P",
+        "language": "en-US"
+      }
+    }
   }
 }

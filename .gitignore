@@ -4,6 +4,7 @@
 .env.*.local
 .eas-token
 .github-token
+.apple-password
 
 # Dependencies
 node_modules/
