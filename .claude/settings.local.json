@@ -105,7 +105,8 @@
       "Bash(curl -sS -H 'Authorization: Bearer __CMDSUB_OUTPUT__' -H 'Content-Type: application/json' -k --ssl-revoke-best-effort -d '{\"query\":\"query\\($appId:ID!\\){app{byId\\(appId:$appId\\){submissions\\(limit:10,offset:0,filter:{platform:IOS}\\){id status createdAt updatedAt error{errorCode message}logFiles}}}}\",\"variables\":{\"appId\":\"8d8fafa4-d73d-4017-becf-c458d9b24831\"}}' https://api.expo.dev/graphql)",
       "Bash(curl -sS -H 'Authorization: Bearer __CMDSUB_OUTPUT__' -H 'Content-Type: application/json' -k --ssl-revoke-best-effort -d '{\"query\":\"query\\($appId:String!\\){app{byId\\(appId:$appId\\){submissions\\(limit:10,offset:0,filter:{platform:IOS}\\){id status createdAt updatedAt error{errorCode message}logFiles}}}}\",\"variables\":{\"appId\":\"8d8fafa4-d73d-4017-becf-c458d9b24831\"}}' https://api.expo.dev/graphql)",
       "Bash(python -m json.tool)",
-      "Bash(npm view *)"
+      "Bash(npm view *)",
+      "Bash(curl -sS -H 'Authorization: Bearer __CMDSUB_OUTPUT__' -H 'Content-Type: application/json' -k --ssl-revoke-best-effort -d '{\"query\":\"query{builds{byId\\(buildId:\\\\\"1bde3242-f22e-49bc-8785-3c1ee6fe7e25\\\\\"\\){id status error{errorCode message}logFiles}}}\"}' https://api.expo.dev/graphql)"
     ]
   }
 }

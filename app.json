@@ -13,9 +13,6 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.urbansuperfoodie.app",
-      "config": {
-        "googleMapsApiKey": "AIzaSyDptWdZugy-Ovvhp6vMv753Hd9XysGiUA8"
-      },
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Urban Super Foodie uses your location to find the best places to eat, drink, and explore around you.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Urban Super Foodie uses your location to find the best places to eat, drink, and explore around you, even when the app is in the background.",
