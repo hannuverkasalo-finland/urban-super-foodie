@@ -39,14 +39,29 @@ interface ContentState {
 }
 
 function dedupeByPlaceId(arr: CuratedPlace[]): CuratedPlace[] {
-  const seen = new Set<string>();
-  const out: CuratedPlace[] = [];
+  // De-dupe by Google place_id while preferring the entry with more expert
+  // source citations (Phase 1+ Claude-curated wins over Phase 0 nearby-popular).
+  // Then sort: expert-cited venues first, popular-nearby fallback below.
+  const byId = new Map<string, CuratedPlace>();
   for (const p of arr) {
-    if (seen.has(p.id)) continue;
-    seen.add(p.id);
-    out.push(p);
+    const existing = byId.get(p.id);
+    if (!existing) {
+      byId.set(p.id, p);
+      continue;
+    }
+    const existingCites = existing.sourceInspirations?.length ?? 0;
+    const newCites = p.sourceInspirations?.length ?? 0;
+    if (newCites > existingCites) {
+      byId.set(p.id, p);
+    }
   }
-  return out.map((p, i) => ({ ...p, rank: i + 1 }));
+  const sorted = Array.from(byId.values()).sort((a, b) => {
+    const aC = a.sourceInspirations?.length ?? 0;
+    const bC = b.sourceInspirations?.length ?? 0;
+    if (aC !== bC) return bC - aC;
+    return (a.rank ?? 999) - (b.rank ?? 999);
+  });
+  return sorted.map((p, i) => ({ ...p, rank: i + 1 }));
 }
 
 export const useContentStore = create<ContentState>()(

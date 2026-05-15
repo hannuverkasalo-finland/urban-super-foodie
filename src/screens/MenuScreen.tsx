@@ -1,6 +1,6 @@
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Image,
@@ -13,18 +13,38 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { analyzeMenu } from '../api/claude';
 import Button from '../components/Button';
-import LoadingState from '../components/LoadingState';
-import { useLocationStore } from '../store/locationStore';
+import StatusBanner from '../components/StatusBanner';
 import { useMenuStore } from '../store/menuStore';
+import { useLocationStore } from '../store/locationStore';
 import { useUserStore } from '../store/userStore';
 import { dlog, dwarn } from '../store/debugLog';
+import {
+  clearProgress,
+  MENU_PROGRESS_KEY,
+  publishProgress,
+} from '../store/progressStore';
 import { colors, radius, shadow, spacing, typography } from '../theme';
 
-// Anthropic's vision API has a 5MB per-image limit. We resize to 1568 wide
-// (Claude's optimal) at JPEG quality 0.7. A typical phone photo becomes
-// ~150-300KB raw → ~200-400KB base64. Well under limit, fast to upload.
+// Anthropic vision: 5MB per-image cap. We resize aggressively + JPEG-compress
+// to ~150-250 KB so the upload finishes fast on mobile and the OS doesn't
+// kill us mid-flight. quality 0.4 here is BEFORE manipulator re-compression
+// (which uses 0.7) — picker quality only affects the raw camera/library
+// source bitmap size that lands in JS, not the eventual payload.
+const PICKER_QUALITY = 0.4;
 const MENU_MAX_WIDTH = 1568;
 const MENU_JPEG_QUALITY = 0.7;
+const MENU_TIMEOUT_MS = 90_000;
+
+type MenuStage = 'idle' | 'picking' | 'resizing' | 'uploading' | 'parsing' | 'done';
+
+const STAGE_LABELS: Record<MenuStage, string> = {
+  idle: '',
+  picking: 'Opening picker…',
+  resizing: 'Resizing & compressing image…',
+  uploading: 'Uploading to Claude vision (this can take up to a minute)…',
+  parsing: 'Reading & translating menu, picking your recommendations…',
+  done: 'Done.',
+};
 
 export default function MenuScreen() {
   const city = useLocationStore((s) => s.city);
@@ -38,15 +58,52 @@ export default function MenuScreen() {
   const clear = useMenuStore((s) => s.clear);
 
   const [localPreview, setLocalPreview] = useState<string | null>(null);
+  const [stage, setStage] = useState<MenuStage>('idle');
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const abortRef = useRef<AbortController | null>(null);
+  const startedAtRef = useRef<number>(0);
+
+  // Elapsed-time ticker — runs only while loading.
+  useEffect(() => {
+    if (status !== 'loading') {
+      setElapsedSec(0);
+      return;
+    }
+    startedAtRef.current = Date.now();
+    setElapsedSec(0);
+    const interval = setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - startedAtRef.current) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [status]);
+
+  // Abort the in-flight analyze when leaving the screen / unmount.
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  function reportStage(s: MenuStage, extra?: string) {
+    setStage(s);
+    const label = extra ? `${STAGE_LABELS[s]} ${extra}` : STAGE_LABELS[s];
+    if (s !== 'idle' && s !== 'done') {
+      publishProgress(MENU_PROGRESS_KEY, label);
+    }
+  }
 
   async function analyze(uri: string) {
     setLocalPreview(uri);
     setStatus('loading');
     setError(null);
+    reportStage('resizing');
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
       dlog('menu', `analyze start uri=${uri.slice(-80)}`);
-      // Resize + recompress to keep us well under Anthropic's 5MB image limit
-      // and shrink the upload payload (so the call doesn't appear to hang).
+
       const t0 = Date.now();
       const manipulated = await ImageManipulator.manipulateAsync(
         uri,
@@ -65,12 +122,19 @@ export default function MenuScreen() {
         `resized in ${Date.now() - t0}ms · ${manipulated.width}x${manipulated.height} · ${manipulated.base64.length} chars base64`
       );
 
+      if (controller.signal.aborted) {
+        throw new Error('Cancelled');
+      }
+
       const cityName = city?.name ?? 'Unknown';
       const countryName = city?.country ?? '';
+      const sizeKb = Math.round((manipulated.base64.length * 3) / 4 / 1024);
+      reportStage('uploading', `(~${sizeKb} KB to send)`);
       dlog(
         'menu',
-        `analyzeMenu start (city=${cityName}, ${manipulated.base64.length} chars)`
+        `analyzeMenu start (city=${cityName}, ~${sizeKb}KB encoded)`
       );
+
       const t1 = Date.now();
       const result = await analyzeMenu(
         manipulated.base64,
@@ -78,55 +142,120 @@ export default function MenuScreen() {
         cityName,
         countryName,
         prefs,
-        manipulated.uri
+        manipulated.uri,
+        { signal: controller.signal, timeoutMs: MENU_TIMEOUT_MS }
       );
+
+      reportStage('parsing');
       dlog(
         'menu',
         `analyzeMenu done in ${Date.now() - t1}ms: ${result.sections.length} sections, ${result.recommendations.length} recs`
       );
+
       setCurrent(result);
+      reportStage('done');
+      clearProgress(MENU_PROGRESS_KEY);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       dwarn('menu', `failed: ${msg}`);
       setError(msg);
-      Alert.alert('Menu analysis failed', msg.slice(0, 500));
+      clearProgress(MENU_PROGRESS_KEY);
+      // Show alert. Even if user navigated away, the error is also stored in
+      // the menu store and shown on the empty screen via the error box.
+      Alert.alert(
+        'Menu analysis failed',
+        msg.slice(0, 500) + '\n\nTry a clearer photo, or a smaller portion of the menu.'
+      );
+    } finally {
+      abortRef.current = null;
     }
   }
 
+  function cancel() {
+    abortRef.current?.abort();
+    setStatus('idle');
+    setError(null);
+    setLocalPreview(null);
+    clearProgress(MENU_PROGRESS_KEY);
+  }
+
   async function pickFromCamera() {
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert('Camera permission denied');
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ['images'],
-      quality: 0.6,
-    });
-    if (!result.canceled && result.assets[0]) {
-      await analyze(result.assets[0].uri);
+    try {
+      reportStage('picking');
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Camera permission denied');
+        reportStage('idle');
+        return;
+      }
+      // Aggressively reduce memory pressure on Android. exif:false strips
+      // metadata, quality 0.4 shrinks the raw camera bitmap, and we don't
+      // ask for editing (which spawns a second activity = more OOM risk).
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        quality: PICKER_QUALITY,
+        exif: false,
+      });
+      if (result.canceled) {
+        reportStage('idle');
+        return;
+      }
+      const asset = result.assets?.[0];
+      if (!asset?.uri) {
+        Alert.alert('No photo captured', 'Try again.');
+        reportStage('idle');
+        return;
+      }
+      await analyze(asset.uri);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      dwarn('menu', `camera pick failed: ${msg}`);
+      setError(msg);
+      Alert.alert('Camera failed', msg.slice(0, 400));
+      reportStage('idle');
     }
   }
 
   async function pickFromLibrary() {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert('Photo library permission denied');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.6,
-      selectionLimit: 1,
-    });
-    if (!result.canceled && result.assets[0]) {
-      await analyze(result.assets[0].uri);
+    try {
+      reportStage('picking');
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Photo library permission denied');
+        reportStage('idle');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: PICKER_QUALITY,
+        selectionLimit: 1,
+        exif: false,
+      });
+      if (result.canceled) {
+        reportStage('idle');
+        return;
+      }
+      const asset = result.assets?.[0];
+      if (!asset?.uri) {
+        Alert.alert('No photo selected', 'Try again.');
+        reportStage('idle');
+        return;
+      }
+      await analyze(asset.uri);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      dwarn('menu', `library pick failed: ${msg}`);
+      setError(msg);
+      Alert.alert('Library pick failed', msg.slice(0, 400));
+      reportStage('idle');
     }
   }
 
   function reset() {
     clear();
     setLocalPreview(null);
+    setStage('idle');
+    clearProgress(MENU_PROGRESS_KEY);
   }
 
   // ===== Renders =====
@@ -135,15 +264,65 @@ export default function MenuScreen() {
     return (
       <SafeAreaView style={styles.root} edges={['top']}>
         <View style={styles.header}>
-          <Text style={styles.title}>Menu</Text>
-          <Text style={styles.subtitle}>
-            Reading & translating with Claude vision…
-          </Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.title}>Menu</Text>
+            <Text style={styles.subtitle}>
+              {STAGE_LABELS[stage] || 'Analysing the menu…'}
+            </Text>
+          </View>
         </View>
+
+        <StatusBanner scopeKey={MENU_PROGRESS_KEY} accent={colors.menu} />
+
         {localPreview && (
-          <Image source={{ uri: localPreview }} style={styles.previewLarge} />
+          <View style={styles.previewLargeWrap}>
+            <Image
+              source={{ uri: localPreview }}
+              style={styles.previewLarge}
+              resizeMode="cover"
+            />
+            <View style={styles.timerOverlay}>
+              <Text style={styles.timerText}>
+                {elapsedSec}s · {stage}
+              </Text>
+            </View>
+          </View>
         )}
-        <LoadingState message="Analysing the menu…" />
+
+        <View style={styles.loadingFooter}>
+          <View style={styles.stageBar}>
+            <View
+              style={[
+                styles.stageStep,
+                stageReached(stage, 'resizing') && styles.stageStepDone,
+              ]}
+            />
+            <View
+              style={[
+                styles.stageStep,
+                stageReached(stage, 'uploading') && styles.stageStepDone,
+              ]}
+            />
+            <View
+              style={[
+                styles.stageStep,
+                stageReached(stage, 'parsing') && styles.stageStepDone,
+              ]}
+            />
+            <View
+              style={[
+                styles.stageStep,
+                stageReached(stage, 'done') && styles.stageStepDone,
+              ]}
+            />
+          </View>
+          <Text style={styles.loadingHint}>
+            {stage === 'uploading'
+              ? 'Large menus can take 30-60s. You can leave this tab — we keep working.'
+              : 'Reading the menu image. Hold tight.'}
+          </Text>
+          <Button label="Cancel" variant="ghost" onPress={cancel} />
+        </View>
       </SafeAreaView>
     );
   }
@@ -162,7 +341,8 @@ export default function MenuScreen() {
             <Text style={styles.iconBig}>🍽️📸</Text>
             <Text style={styles.cardEmptyTitle}>Snap your menu</Text>
             <Text style={styles.cardEmptyBody}>
-              Hold steady — clear text reads more accurately.
+              Hold steady — clear text reads more accurately. Tip: take the
+              photo close enough that text is sharp.
             </Text>
             <View style={styles.actions}>
               <Button label="Take a photo" onPress={pickFromCamera} />
@@ -178,6 +358,10 @@ export default function MenuScreen() {
               <Text style={styles.errorTitle}>Last error</Text>
               <Text style={styles.errorBody} selectable>
                 {error}
+              </Text>
+              <Text style={styles.errorHint}>
+                Quick fixes to try: take a closer / clearer photo · drop one
+                section of the menu at a time · check internet · retry.
               </Text>
             </View>
           )}
@@ -277,6 +461,11 @@ export default function MenuScreen() {
   );
 }
 
+function stageReached(current: MenuStage, target: MenuStage): boolean {
+  const order: MenuStage[] = ['idle', 'picking', 'resizing', 'uploading', 'parsing', 'done'];
+  return order.indexOf(current) >= order.indexOf(target);
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   header: {
@@ -340,6 +529,12 @@ const styles = StyleSheet.create({
   },
   errorTitle: { ...typography.bodyBold, color: colors.danger, marginBottom: 4 },
   errorBody: { ...typography.small, color: colors.text },
+  errorHint: {
+    ...typography.small,
+    color: colors.textMuted,
+    marginTop: 8,
+    lineHeight: 18,
+  },
 
   scroll: { padding: spacing.l, paddingBottom: spacing.xxl },
   preview: {
@@ -349,13 +544,55 @@ const styles = StyleSheet.create({
     marginBottom: spacing.l,
     backgroundColor: colors.bgCard,
   },
-  previewLarge: {
+  previewLargeWrap: {
     width: '90%',
-    height: 220,
     alignSelf: 'center',
-    borderRadius: radius.l,
     marginTop: spacing.m,
+    marginBottom: spacing.l,
+    position: 'relative',
+  },
+  previewLarge: {
+    width: '100%',
+    height: 260,
+    borderRadius: radius.l,
     backgroundColor: colors.bgCard,
+  },
+  timerOverlay: {
+    position: 'absolute',
+    bottom: 10,
+    left: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderRadius: radius.pill,
+  },
+  timerText: {
+    ...typography.micro,
+    color: colors.text,
+    fontWeight: '700',
+  },
+  loadingFooter: {
+    paddingHorizontal: spacing.l,
+    gap: spacing.m,
+  },
+  stageBar: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  stageStep: {
+    flex: 1,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.bgChip,
+  },
+  stageStepDone: {
+    backgroundColor: colors.menu,
+  },
+  loadingHint: {
+    ...typography.small,
+    color: colors.textMuted,
+    lineHeight: 19,
+    textAlign: 'center',
   },
 
   recBlock: { marginTop: spacing.s },

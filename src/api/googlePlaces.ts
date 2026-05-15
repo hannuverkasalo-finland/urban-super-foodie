@@ -98,6 +98,86 @@ export function buildPhotoUrl(
   return `${BASE}/photo?maxwidth=${maxWidth}&photoreference=${photoReference}&key=${KEY}`;
 }
 
+interface NearbySearchResponse {
+  results?: Array<{
+    place_id?: string;
+    name?: string;
+    geometry?: { location?: { lat: number; lng: number } };
+    rating?: number;
+    user_ratings_total?: number;
+    price_level?: number;
+    vicinity?: string;
+    photos?: Array<{ photo_reference?: string }>;
+    business_status?: string;
+    types?: string[];
+  }>;
+  status?: string;
+  error_message?: string;
+}
+
+/**
+ * One-shot nearby places query for instant "popular nearby" content. Returns
+ * up to 20 venues in ~500ms, no Claude involvement. Used for Phase 0 of the
+ * prefetch so the user sees pins on the map within seconds while the Claude
+ * curators do their deeper work in the background.
+ */
+export async function searchNearby(
+  lat: number,
+  lng: number,
+  type: 'restaurant' | 'bar' | 'tourist_attraction',
+  options: { radiusMeters?: number; minRating?: number } = {}
+): Promise<PlaceFindResult[]> {
+  if (!KEY) throw new Error('Missing EXPO_PUBLIC_GOOGLE_MAPS_API_KEY');
+  const radius = options.radiusMeters ?? 2500;
+  const url =
+    `${BASE}/nearbysearch/json?location=${lat},${lng}` +
+    `&radius=${radius}&type=${type}&key=${KEY}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      logFailure('searchNearby', `HTTP ${res.status}`);
+      return [];
+    }
+    const json: NearbySearchResponse = await res.json();
+    if (
+      json.status &&
+      json.status !== 'OK' &&
+      json.status !== 'ZERO_RESULTS'
+    ) {
+      logFailure(
+        'searchNearby',
+        `${json.status}: ${json.error_message ?? 'no detail'}`
+      );
+      return [];
+    }
+    const minRating = options.minRating ?? 4.2;
+    const results = (json.results ?? [])
+      .filter(
+        (r) =>
+          r.business_status === 'OPERATIONAL' &&
+          r.geometry?.location &&
+          r.place_id &&
+          (r.rating ?? 0) >= minRating
+      )
+      .map<PlaceFindResult>((r) => ({
+        placeId: r.place_id!,
+        name: r.name ?? 'Unnamed',
+        lat: r.geometry!.location!.lat,
+        lng: r.geometry!.location!.lng,
+        rating: r.rating,
+        userRatingsTotal: r.user_ratings_total,
+        priceLevel: r.price_level,
+        formattedAddress: r.vicinity,
+        photoReference: r.photos?.[0]?.photo_reference,
+        businessStatus: r.business_status,
+      }));
+    return results;
+  } catch (err) {
+    logFailure('searchNearby', err);
+    return [];
+  }
+}
+
 interface GeocodeResponse {
   results?: Array<{
     address_components?: Array<{

@@ -3,8 +3,10 @@ import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ContentPager from '../components/ContentPager';
 import LoadingState from '../components/LoadingState';
+import StatusBanner from '../components/StatusBanner';
 import { useContentStore } from '../store/contentStore';
 import { useLocationStore } from '../store/locationStore';
+import { progressKeyFor } from '../store/progressStore';
 import { useUserStore } from '../store/userStore';
 import { cityKeyFor, prefetchCity } from '../services/prefetchService';
 import { colors, spacing, typography } from '../theme';
@@ -45,6 +47,13 @@ export default function InfoScreen() {
           <Text style={styles.title}>Place</Text>
           <Text style={styles.subtitle}>{city.name}</Text>
         </View>
+        {cityKey && (
+          <StatusBanner
+            scopeKey={progressKeyFor(cityKey, 'place')}
+            accent={colors.info}
+            fallback={`Researching ${city.name} across Lonely Planet, Atlas Obscura, Wallpaper*, Wikipedia & live news…`}
+          />
+        )}
         <LoadingState message={`Reading up on ${city.name}…`} />
       </SafeAreaView>
     );
@@ -56,6 +65,12 @@ export default function InfoScreen() {
         <Text style={styles.title}>Place</Text>
         <Text style={styles.subtitle}>{city.name} essentials</Text>
       </View>
+      {cityKey && (
+        <StatusBanner
+          scopeKey={progressKeyFor(cityKey, 'place')}
+          accent={colors.info}
+        />
+      )}
       <ContentPager pages={content.infoPages} fallbackAccent={colors.info} />
     </SafeAreaView>
   );

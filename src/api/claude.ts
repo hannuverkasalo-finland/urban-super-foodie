@@ -37,6 +37,10 @@ interface CallClaudeOptions {
   webSearch?: boolean;
   /** Max times Claude may call web_search in one turn. Default 3. */
   webSearchMaxUses?: number;
+  /** Hard ceiling in milliseconds. Aborts the fetch when exceeded. */
+  timeoutMs?: number;
+  /** External abort signal so callers can cancel (e.g. user navigates away). */
+  signal?: AbortSignal;
 }
 
 async function callClaude(
@@ -66,15 +70,39 @@ async function callClaude(
       },
     ];
   }
-  const res = await fetch(ANTHROPIC_URL, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': API_KEY,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify(body),
-  });
+  // Combine an optional caller-provided signal with our internal timeout signal
+  // so whichever fires first triggers a clean abort. Without this a stuck
+  // request would block forever and silently appear "stuck" to the user.
+  const controller = new AbortController();
+  const timeoutMs = opts.timeoutMs ?? 180_000; // 3-min default
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onExternalAbort = () => controller.abort();
+  opts.signal?.addEventListener('abort', onExternalAbort);
+  let res: Response;
+  try {
+    res = await fetch(ANTHROPIC_URL, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (
+      (err instanceof Error && err.name === 'AbortError') ||
+      controller.signal.aborted
+    ) {
+      dwarn(label, `aborted after ${Date.now() - t0}ms (timeout=${timeoutMs}ms)`);
+      throw new Error(`Claude request aborted after ${Date.now() - t0}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    opts.signal?.removeEventListener('abort', onExternalAbort);
+  }
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
     dwarn(label, `HTTP ${res.status}: ${errText.slice(0, 200)}`);
@@ -563,7 +591,8 @@ async function callClaudeWithImage(
   imageBase64: string,
   imageMediaType: string,
   maxTokens: number,
-  label: string
+  label: string,
+  opts: { timeoutMs?: number; signal?: AbortSignal } = {}
 ): Promise<string> {
   if (!API_KEY) throw new Error('Missing EXPO_PUBLIC_ANTHROPIC_API_KEY');
   const t0 = Date.now();
@@ -588,15 +617,38 @@ async function callClaudeWithImage(
       },
     ],
   };
-  const res = await fetch(ANTHROPIC_URL, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': API_KEY,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify(body),
-  });
+  // Same abort+timeout dance as callClaude; menu vision calls are big so the
+  // user MUST be able to cancel if the network stalls.
+  const controller = new AbortController();
+  const timeoutMs = opts.timeoutMs ?? 90_000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onExternalAbort = () => controller.abort();
+  opts.signal?.addEventListener('abort', onExternalAbort);
+  let res: Response;
+  try {
+    res = await fetch(ANTHROPIC_URL, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (
+      (err instanceof Error && err.name === 'AbortError') ||
+      controller.signal.aborted
+    ) {
+      dwarn(label, `vision aborted after ${Date.now() - t0}ms (timeout=${timeoutMs}ms)`);
+      throw new Error(`Vision request aborted after ${Math.round((Date.now() - t0) / 1000)}s`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    opts.signal?.removeEventListener('abort', onExternalAbort);
+  }
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
     dwarn(label, `HTTP ${res.status}: ${errText.slice(0, 200)}`);
@@ -646,7 +698,8 @@ export async function analyzeMenu(
   cityName: string,
   countryName: string,
   prefs: UserPreferences,
-  photoUri: string
+  photoUri: string,
+  opts: { signal?: AbortSignal; timeoutMs?: number } = {}
 ): Promise<MenuAnalysis> {
   const system = `You are an expert sommelier, food critic, and translator. You are looking at a photo of a menu (food, drinks, wines, or cocktails) from a venue in ${cityName}, ${countryName}.
 
@@ -702,7 +755,8 @@ Rules:
     imageBase64,
     imageMediaType,
     8000,
-    'claude.menu'
+    'claude.menu',
+    { signal: opts.signal, timeoutMs: opts.timeoutMs ?? 90_000 }
   );
   const gen = extractJson<MenuGen>(raw, 'parse.menu');
   return {

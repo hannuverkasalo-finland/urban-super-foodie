@@ -12,8 +12,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import CityPickerModal from '../components/CityPickerModal';
 import MapMarker from '../components/MapMarker';
 import PlaceCard from '../components/PlaceCard';
+import StatusBanner from '../components/StatusBanner';
 import { useContentStore } from '../store/contentStore';
 import { useLocationStore } from '../store/locationStore';
+import { progressKeyFor } from '../store/progressStore';
 import { useUserStore } from '../store/userStore';
 import { cityKeyFor, prefetchCity } from '../services/prefetchService';
 import { colors, radius, spacing, typography } from '../theme';
@@ -230,6 +232,13 @@ export default function MapScreen({ category }: Props) {
           </Text>
         </Pressable>
       </View>
+
+      {cityKey && (
+        <StatusBanner
+          scopeKey={progressKeyFor(cityKey, category)}
+          accent={accents[category]}
+        />
+      )}
 
       <View style={styles.mapWrap}>
         <MapView

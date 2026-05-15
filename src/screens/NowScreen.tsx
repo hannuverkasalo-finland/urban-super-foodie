@@ -11,10 +11,12 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LoadingState from '../components/LoadingState';
+import StatusBanner from '../components/StatusBanner';
 import { describeWeather } from '../api/openMeteo';
 import { cityKeyFor, prefetchNow } from '../services/prefetchService';
 import { useContentStore } from '../store/contentStore';
 import { useLocationStore } from '../store/locationStore';
+import { progressKeyFor } from '../store/progressStore';
 import { useUserStore } from '../store/userStore';
 import { colors, radius, spacing, typography } from '../theme';
 
@@ -66,6 +68,13 @@ export default function NowScreen() {
             <Text style={styles.subtitle}>{city.name} · reading the room…</Text>
           </View>
         </View>
+        {cityKey && (
+          <StatusBanner
+            scopeKey={progressKeyFor(cityKey, 'now')}
+            accent={colors.now}
+            fallback={`Tuning into ${city.name} — weather, news, your vibe…`}
+          />
+        )}
         <LoadingState message={`Tuning into ${city.name}…`} />
       </SafeAreaView>
     );
@@ -101,6 +110,13 @@ export default function NowScreen() {
             )}
           </View>
         </View>
+
+        {cityKey && (
+          <StatusBanner
+            scopeKey={progressKeyFor(cityKey, 'now')}
+            accent={colors.now}
+          />
+        )}
 
         <View style={styles.body}>
           <Text style={styles.slogan}>"{now.slogan}"</Text>
