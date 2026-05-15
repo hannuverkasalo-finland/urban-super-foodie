@@ -113,10 +113,48 @@ export default function NowScreen() {
           </View>
           <Text style={styles.bigPicture}>{now.bigPicture}</Text>
 
+          {now.hourly && now.hourly.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Next 48h, hour-by-hour</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.hourlyRow}
+              >
+                {now.hourly.map((h, i) => {
+                  const w = describeWeather(h.weatherCode);
+                  // Show a day-divider label only when dayLabel changes
+                  const prev = i > 0 ? now.hourly![i - 1] : null;
+                  const showDayHeader =
+                    !prev || prev.dayLabel !== h.dayLabel;
+                  return (
+                    <View key={i} style={styles.hourCard}>
+                      <Text style={styles.hourDay}>
+                        {showDayHeader ? h.dayLabel : ' '}
+                      </Text>
+                      <Text style={styles.hourLabel}>{h.hourLabel}</Text>
+                      <Text style={styles.hourEmoji}>{w.emoji}</Text>
+                      <Text style={styles.hourTemp}>{h.tempC}°</Text>
+                      <Text style={styles.hourPrecip}>
+                        {h.precipitationProbability > 0
+                          ? `${h.precipitationProbability}%`
+                          : '—'}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          )}
+
           {now.forecast && now.forecast.length > 0 && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Next few days</Text>
-              <View style={styles.forecastRow}>
+              <Text style={styles.sectionTitle}>Next 7 days</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.forecastRow}
+              >
                 {now.forecast.map((d, i) => {
                   const w = describeWeather(d.weatherCode);
                   return (
@@ -132,7 +170,7 @@ export default function NowScreen() {
                     </View>
                   );
                 })}
-              </View>
+              </ScrollView>
             </View>
           )}
 
@@ -340,11 +378,12 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginBottom: 4,
   },
-  forecastRow: { flexDirection: 'row', gap: 8 },
+  forecastRow: { flexDirection: 'row', gap: 8, paddingRight: spacing.l },
   forecastCard: {
-    flex: 1,
     alignItems: 'center',
     paddingVertical: 12,
+    paddingHorizontal: 14,
+    minWidth: 64,
     backgroundColor: colors.bgCard,
     borderRadius: radius.m,
     borderWidth: 1,
@@ -358,6 +397,34 @@ const styles = StyleSheet.create({
   forecastEmoji: { fontSize: 26, marginVertical: 4 },
   forecastTemp: { ...typography.bodyBold, color: colors.text },
   forecastLow: { ...typography.small, color: colors.textMuted },
+  hourlyRow: { flexDirection: 'row', gap: 6, paddingRight: spacing.l },
+  hourCard: {
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    minWidth: 56,
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.m,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  hourDay: {
+    ...typography.micro,
+    color: colors.now,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  hourLabel: {
+    ...typography.micro,
+    color: colors.textMuted,
+  },
+  hourEmoji: { fontSize: 18, marginVertical: 2 },
+  hourTemp: { ...typography.bodyBold, color: colors.text },
+  hourPrecip: {
+    ...typography.micro,
+    color: colors.info,
+    marginTop: 2,
+  },
   themeCard: {
     backgroundColor: colors.bgCard,
     padding: spacing.m,

@@ -32,16 +32,40 @@ interface AnthropicResponse {
   usage?: { input_tokens: number; output_tokens: number };
 }
 
+interface CallClaudeOptions {
+  /** Enable Claude's server-side web search tool for fresh real-world data. */
+  webSearch?: boolean;
+  /** Max times Claude may call web_search in one turn. Default 3. */
+  webSearchMaxUses?: number;
+}
+
 async function callClaude(
   systemPrompt: string,
   userPrompt: string,
   maxTokens = 4000,
-  label = 'claude'
+  label = 'claude',
+  opts: CallClaudeOptions = {}
 ): Promise<string> {
   if (!API_KEY) {
     throw new Error('Missing EXPO_PUBLIC_ANTHROPIC_API_KEY');
   }
   const t0 = Date.now();
+  // Body shape allows an optional tools array for server-side web_search.
+  const body: Record<string, unknown> = {
+    model: MODEL,
+    max_tokens: maxTokens,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userPrompt }],
+  };
+  if (opts.webSearch) {
+    body.tools = [
+      {
+        type: 'web_search_20250305',
+        name: 'web_search',
+        max_uses: opts.webSearchMaxUses ?? 3,
+      },
+    ];
+  }
   const res = await fetch(ANTHROPIC_URL, {
     method: 'POST',
     headers: {
@@ -49,12 +73,7 @@ async function callClaude(
       'x-api-key': API_KEY,
       'anthropic-version': '2023-06-01',
     },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: maxTokens,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userPrompt }],
-    }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
@@ -213,12 +232,26 @@ export async function curatePlaces(
 
   const sourceList = sources.map((s) => `- ${s}`).join('\n');
 
-  const system = `You are an expert urban travel curator with deep knowledge of these reference sources:
+  const system = `You are a hyper-selective urban concierge curating ONLY venues that the expert reference sources below have written up, ranked, or starred. NEVER include generic crowd-pleasers, chain restaurants, mass-market spots, or tourist traps. Every pick MUST be one that at least one of these specialised editors would put in their own list:
 ${sourceList}
 
-You must produce concrete, real, currently-existing places. Never invent. Only use venues that exist on Google Maps with at least 4.0 rating and 10+ reviews to the best of your knowledge. Prioritize places mentioned in the reference sources above. Respond with valid JSON only — no preamble, no markdown.
+For ${category === 'eat' ? 'food' : category === 'drink' ? 'drinks (wines, cocktails, coffee, beer, sake, etc.)' : 'activities and culture'}, weight heavily toward:
+${
+  category === 'eat'
+    ? '- Michelin-recognised kitchens, World\'s 50 Best lists, Eater Essentials, Infatuation Top picks, Bib Gourmand, Opinionated About Dining\n- Chef-driven, ingredient-led, regional-specialty kitchens\n- Star Wine List restaurants for wine-led venues'
+    : category === 'drink'
+    ? '- Raisin-listed natural-wine bars, Star Wine List spots, World\'s 50 Best Bars / Top 500 Bars / Difford\'s notable venues\n- Untappd top-rated and RateBeer Best craft beer\n- Vivino-verified bottle lists, Wine-Searcher backed venues\n- Sprudge / Perfect Daily Grind specialty-coffee roasters and shops\n- For cocktails: Punch, Liquor.com, Imbibe-mentioned bars'
+    : '- Atlas Obscura, Wallpaper* City Guide, Condé Nast, National Geographic Travel-listed places\n- Design-led / architecture-significant venues\n- Time Out / Culture Trip current top picks'
+}
 
-CRITICAL FOR JSON COMPLETENESS: Keep each entry compact. The "why_recommended" field MUST be a single short sentence (max 25 words). The "source_inspirations" array MUST contain at most 3 source names. This ensures the response stays under the token budget. Output ONLY the JSON array, no surrounding prose.`;
+Hard rules:
+- Real, currently-operating venues only. If you suspect a place may have closed, drop it.
+- Must be on Google Maps with ≥4.2 rating and ≥25 reviews (best of your knowledge).
+- Spell the venue name EXACTLY as it appears on Google Maps so it can be matched.
+- The "source_inspirations" array MUST contain at least one of the named sources above that has actually featured this place. If you can't cite a real expert source for a venue, do NOT include it.
+- Each "why_recommended" is ONE compact sentence (max 25 words), citing what makes this place a specialist's pick.
+- Keep "source_inspirations" to max 3 entries.
+- Output ONLY the JSON array — no preamble, no markdown, no commentary.`;
 
   const excludeBlock =
     excludeNames.length > 0
@@ -245,11 +278,13 @@ Output JSON only — an array of ${count} objects with this exact shape:
 ]
 
 Strict requirements:
-- Only real venues, currently operating
+- Only real venues, currently operating, currently open this week
+- Each pick MUST be one a specialist editor (from the system source list) would actually endorse — no generic crowd-pleasers, no chains, no tourist traps
+- "source_inspirations" must include at least one real source that has covered the venue. If you can't cite one honestly, skip the venue.
 - Spell venue names exactly so they can be matched on Google Maps
-- Order by how well it matches the user's preferences
+- Order by how well it matches the user's preferences AND by editorial reputation
 - Diverse mix across price points and neighborhoods
-- Keep "why_recommended" to ONE short sentence (max 25 words)
+- Keep "why_recommended" to ONE short sentence (max 25 words), citing what specialists love
 - Keep "source_inspirations" to max 3 entries
 - Output ONLY the JSON array, nothing else.`;
 
@@ -305,30 +340,41 @@ export async function generateInfoContent(
   cityName: string,
   countryName: string
 ): Promise<ContentPage[]> {
-  const system = `You are an expert urban travel writer drawing on Lonely Planet, Condé Nast Traveler, National Geographic Travel, Atlas Obscura, Wikipedia, Time Out, and Wallpaper* City Guides. Respond with valid JSON only — no preamble, no markdown.`;
+  const system = `You are a sharp, witty travel writer with the voice of a global globetrotter who has actually been there — drawing on Lonely Planet, Condé Nast Traveler, National Geographic Travel, Atlas Obscura, Wikipedia, Time Out, Wallpaper* City Guides, plus deep web research.
+
+For pages 3-6 you MUST use the web_search tool to ground content in REAL events, political shifts, cultural moves, and direction-of-the-city stories from the past 10-20 years and especially the last few years. Don't speculate — search and cite.
+
+Tone: humorous, specific, never generic. Drop in dry one-liners and globetrotter knowing-asides. Use real names, real dates, real numbers. Respond with valid JSON only — no preamble, no markdown.`;
 
   const user = `City: ${cityName}, ${countryName}
 
-Create a 3-page mini guide titled "${cityName} essentials". Each page covers a different angle:
-Page 1: Core facts, history, and why ${cityName} is famous
-Page 2: What's cool, current, and culturally relevant right now
-Page 3: Curious facts, hidden spots, and key experiences any visitor must try
+Create a 6-page deep-dive titled "${cityName} essentials". Each page has a distinct angle and is RICH in detail. Each page's body should be 3-4 substantial paragraphs (~250-300 words each). No platitudes, no clichés.
 
-Output JSON only — an array of exactly 3 objects:
+Page 1 — "The deep history": founding, key empires/dynasties, defining battles or treaties, why the city ended up where it did geographically/economically. Real dates, real names. Write it like an entertaining popular-history podcast.
+Page 2 — "20th century shifts": wars, revolutions, regime changes, industrial rises and falls, the people who shaped the city. Concrete events with dates.
+Page 3 — "Modern era — political and social shifts (past 10-20 years)": real recent politics, elections, protests, social movements, leadership changes, EU/regional dynamics. USE WEB SEARCH for the past 5 years specifically.
+Page 4 — "Cultural fabric right now": music scene, art, literature, food revolution, what's edgy, what's establishment, where the cool kids vs. the old guard go. USE WEB SEARCH for current cultural news.
+Page 5 — "Hidden gems and curious facts": insider knowledge — unusual museums, ghost stories, secret bars, underground spots, neighborhoods locals love that tourists miss. Funny and specific.
+Page 6 — "Where ${cityName} is heading": new infrastructure, demographic shifts, gentrification debates, tech/creative-industry moves, urban-planning controversies, climate adaptation, expat flows. USE WEB SEARCH for current direction-of-city stories.
+
+Output ONLY this JSON shape — an array of exactly 6 objects:
 [
   {
-    "title": "page title (4-7 words)",
-    "subtitle": "short subtitle (under 12 words)",
-    "body": "2-3 paragraphs — concrete, specific, no generic platitudes",
-    "highlights": ["array of 5 sharp bullet facts/tips, max 8 words each"],
-    "accentHex": "matching hex color"
+    "title": "page title (4-7 words, evocative)",
+    "subtitle": "short subtitle (under 14 words)",
+    "body": "3-4 paragraphs of vivid, specific prose with real names/dates/numbers. Globetrotter voice — humorous, knowing, never dry. 250-300 words.",
+    "highlights": ["5 sharp bullet facts/tips/dates, max 10 words each"],
+    "accentHex": "matching hex colour (e.g. #5BA9FF)"
   }
 ]
-Output ONLY the JSON array.`;
+Output ONLY the JSON array, nothing else.`;
 
-  const raw = await callClaude(system, user, 4000, 'claude.info');
+  const raw = await callClaude(system, user, 16000, 'claude.info', {
+    webSearch: true,
+    webSearchMaxUses: 6,
+  });
   const pages = extractJson<ContentPage[]>(raw, 'parse.info');
-  return pages.slice(0, 3);
+  return pages.slice(0, 6);
 }
 
 interface NowGen {
@@ -403,7 +449,15 @@ export async function generateNowContent(
         .join(', ')}.`
     : 'Weather data unavailable';
 
-  const system = `You are a brilliantly witty, slightly cheeky, deeply knowledgeable local concierge AI. Your job: read this user's profile and generate a hyper-personalised, contextual, hilarious-but-useful "right now" snapshot for the city they're in. Use real venues that exist on Google Maps. Be specific. Be funny. Be warm. Drop lyrical references and inside jokes only a real local would know. Output JSON only — no preamble, no markdown.`;
+  const system = `You are a brilliantly witty, slightly cheeky, deeply knowledgeable local concierge AI. Your job: read this user's profile and generate a hyper-personalised, contextual, hilarious-but-useful "right now" snapshot for the city they're in.
+
+CRITICAL FOR "newsThemes" AND "bigPicture": use the web_search tool to find ACTUAL local news from THIS WEEK in ${cityName}. Search for things like:
+- "${cityName} news this week"
+- "${cityName} ${dateLabel.slice(0, 7)}"  (year-month)
+- big stories, cultural events, sports, food scene happening right now
+DO NOT rely on training data for current events — your training data is outdated. Always cite events from the last 7 days.
+
+Use real venues that exist on Google Maps. Be specific. Be funny. Be warm. Drop lyrical references and inside jokes only a real local would know. After web search, output ONLY the final JSON — no preamble, no markdown, no commentary about what you searched.`;
 
   const user = `City: ${cityName}, ${countryName}
 Local time: ${dayName} ${dateLabel}, ${partOfDay} (${now.toLocaleTimeString()})
@@ -421,10 +475,10 @@ Generate a richly contextual "Now" briefing. Output ONLY this JSON shape, nothin
 
 {
   "slogan": "8-12 word punchy, witty tagline for THIS specific moment of THIS user being in THIS city. Reference the weather, day, and one of the user's preferences. Be funny.",
-  "bigPicture": "2-3 conversational paragraphs (~150 words total) summarising what's happening in ${cityName} right now — major themes locals are talking about this week, mood of the city, what makes this exact day/hour special. Conversational tone, drop in 1-2 jokes, address the user by nickname. Mix in a cheeky reference to their preferences.",
+  "bigPicture": "2-3 conversational paragraphs (~150 words total) summarising what's ACTUALLY happening in ${cityName} this week as found via web_search — name real recent events with approximate dates. Conversational tone, drop in 1-2 jokes, address the user by nickname. Mix in a cheeky reference to their preferences.",
   "newsThemes": [
-    { "title": "Sharp 5-7 word headline", "summary": "1-2 sentence punchy take" }
-  ] (provide exactly 4 — current local conversations: politics, culture, sports/events, food&drink scene),
+    { "title": "Sharp 5-7 word headline of a REAL recent story", "summary": "1-2 sentence punchy take grounded in something found via web_search this week" }
+  ] (provide exactly 4 themes from THIS WEEK in ${cityName} — politics/policy, culture/arts, sports/events, food&drink scene. Each MUST reference a real event from the last 7-14 days. No generic recurring topics.),
   "schedule": [
     { "when": "label like 'Right now', '11:00', 'Lunch', 'Late afternoon', 'Evening drink', 'Dinner', 'Late night'", "activity": "what to do (verb-led)", "place": "specific real venue name in ${cityName}", "why": "why THIS user would love it (reference preferences/weather)" }
   ] (provide exactly 10 entries spanning the next 12-24 hours, ordered chronologically. Mix eats, drinks, activities, walks, viewpoints. Real venues only.),
@@ -436,7 +490,10 @@ Generate a richly contextual "Now" briefing. Output ONLY this JSON shape, nothin
 
 Be unapologetically witty. Reference user's age, gender, language background where relevant. Make the schedule feel like a real day. Output ONLY the JSON.`;
 
-  const raw = await callClaude(system, user, 4500, 'claude.now');
+  const raw = await callClaude(system, user, 6000, 'claude.now', {
+    webSearch: true,
+    webSearchMaxUses: 4,
+  });
   const gen = extractJson<NowGen>(raw, 'parse.now');
 
   return {
@@ -466,11 +523,18 @@ Be unapologetically witty. Reference user's age, gender, language background whe
           summary: describeWeather(weather.current.weatherCode).label,
         }
       : undefined,
-    forecast: weather?.daily.slice(0, 4).map((d) => ({
+    forecast: weather?.daily.slice(0, 7).map((d) => ({
       weekday: d.weekday,
       highC: d.highC,
       lowC: d.lowC,
       weatherCode: d.weatherCode,
+    })),
+    hourly: weather?.hourly.slice(0, 48).map((h) => ({
+      hourLabel: h.hourLabel,
+      dayLabel: h.dayLabel,
+      tempC: h.tempC,
+      weatherCode: h.weatherCode,
+      precipitationProbability: h.precipitationProbability,
     })),
   };
 }

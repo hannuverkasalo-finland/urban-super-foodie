@@ -111,6 +111,13 @@ export interface NowContent {
     lowC: number;
     weatherCode: number;
   }>;
+  hourly?: Array<{
+    hourLabel: string;
+    dayLabel: string;
+    tempC: number;
+    weatherCode: number;
+    precipitationProbability: number;
+  }>;
 }
 
 export interface Coords {

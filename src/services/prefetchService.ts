@@ -36,6 +36,10 @@ const phase2InFlight = new Set<string>();
 const phase3InFlight = new Set<string>();
 const nowInFlight = new Set<string>();
 
+// Stricter curation thresholds — only top-rated, currently-open venues.
+const MIN_RATING = 4.2;
+const MIN_REVIEWS = 25;
+
 async function enrichSeeds(
   seeds: CuratedPlaceSeed[],
   category: PlaceCategory,
@@ -48,6 +52,7 @@ async function enrichSeeds(
   let foundCount = 0;
   let nullCount = 0;
   let belowThresholdCount = 0;
+  let closedCount = 0;
   const batchSize = 5;
   for (let i = 0; i < seeds.length; i += batchSize) {
     const batch = seeds.slice(i, i + batchSize);
@@ -60,9 +65,18 @@ async function enrichSeeds(
             return null;
           }
           foundCount++;
+          // Drop anything not currently operating (covers
+          // CLOSED_TEMPORARILY and CLOSED_PERMANENTLY).
           if (
-            (found.rating ?? 0) < 4.0 ||
-            (found.userRatingsTotal ?? 0) < 10
+            found.businessStatus &&
+            found.businessStatus !== 'OPERATIONAL'
+          ) {
+            closedCount++;
+            return null;
+          }
+          if (
+            (found.rating ?? 0) < MIN_RATING ||
+            (found.userRatingsTotal ?? 0) < MIN_REVIEWS
           ) {
             belowThresholdCount++;
             return null;
@@ -102,7 +116,7 @@ async function enrichSeeds(
   }
   dlog(
     'prefetch',
-    `enrichSeeds(${category}): ${seeds.length} seeds → found ${foundCount}, null ${nullCount}, below threshold ${belowThresholdCount}, kept ${enriched.length}`
+    `enrichSeeds(${category}): ${seeds.length} seeds → found ${foundCount}, null ${nullCount}, below ${MIN_RATING}/${MIN_REVIEWS} ${belowThresholdCount}, closed ${closedCount}, kept ${enriched.length}`
   );
   return enriched;
 }

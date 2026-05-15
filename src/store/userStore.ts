@@ -75,7 +75,7 @@ export const useUserStore = create<UserState>()(
         }),
     }),
     {
-      name: 'usf-user-v1',
+      name: 'usf-user-v2',
       storage: createJSONStorage(() => AsyncStorage),
     }
   )

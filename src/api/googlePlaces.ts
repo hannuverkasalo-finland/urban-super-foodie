@@ -16,6 +16,7 @@ export interface PlaceFindResult {
   priceLevel?: number;
   formattedAddress?: string;
   photoReference?: string;
+  businessStatus?: string;
 }
 
 interface FindPlaceCandidate {
@@ -27,6 +28,7 @@ interface FindPlaceCandidate {
   price_level?: number;
   formatted_address?: string;
   photos?: Array<{ photo_reference?: string }>;
+  business_status?: string;
 }
 
 interface FindPlaceResponse {
@@ -49,6 +51,7 @@ export async function findPlace(
     'price_level',
     'formatted_address',
     'photos',
+    'business_status',
   ].join(',');
   const input = `${query} ${cityHint}`;
   const url = `${BASE}/findplacefromtext/json?input=${encodeURIComponent(
@@ -80,6 +83,7 @@ export async function findPlace(
       priceLevel: c.price_level,
       formattedAddress: c.formatted_address,
       photoReference: c.photos?.[0]?.photo_reference,
+      businessStatus: c.business_status,
     };
   } catch (err) {
     logFailure('findPlace', err);

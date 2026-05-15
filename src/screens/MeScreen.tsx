@@ -114,9 +114,16 @@ export default function MeScreen() {
                   source={{ uri: profile.photoUri }}
                   style={styles.avatarImg}
                   onError={(e) => {
-                    const msg = e.nativeEvent.error ?? 'image failed to load';
-                    setPhotoError(`Image render failed: ${msg}`);
-                    console.warn('[USF] image error:', msg, 'uri:', profile.photoUri);
+                    // Stale URI (file deleted/uninstall): silently clear and
+                    // fall back to the placeholder. The user can re-pick.
+                    const msg =
+                      e.nativeEvent.error ?? 'image failed to load';
+                    console.warn(
+                      '[USF] image error, clearing stale uri:',
+                      msg,
+                      profile.photoUri
+                    );
+                    updateProfile({ photoUri: null });
                   }}
                 />
               ) : (

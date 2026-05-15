@@ -131,7 +131,7 @@ export const useContentStore = create<ContentState>()(
         }),
     }),
     {
-      name: 'usf-content-v1',
+      name: 'usf-content-v2',
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({ cityCache: state.cityCache }),
     }

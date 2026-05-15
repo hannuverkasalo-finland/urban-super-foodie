@@ -27,7 +27,7 @@ export const useMenuStore = create<MenuState>()(
         set({ current: null, status: 'idle', error: null }),
     }),
     {
-      name: 'usf-menu-v1',
+      name: 'usf-menu-v2',
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({ current: state.current }),
     }

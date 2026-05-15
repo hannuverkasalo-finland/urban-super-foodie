@@ -2,7 +2,7 @@
   "expo": {
     "name": "Urban Super Foodie",
     "slug": "urban-super-foodie",
-    "version": "0.1.5",
+    "version": "0.1.6",
     "orientation": "portrait",
     "scheme": "urbansuperfoodie",
     "userInterfaceStyle": "automatic",
@@ -43,7 +43,8 @@
         "googleMaps": {
           "apiKey": "AIzaSyDptWdZugy-Ovvhp6vMv753Hd9XysGiUA8"
         }
-      }
+      },
+      "allowBackup": false
     },
     "plugins": [
       [
@@ -61,7 +62,15 @@
           "cameraPermission": "Urban Super Foodie needs camera access so you can take a profile picture."
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "allowBackup": false
+          }
+        }
+      ]
     ],
     "extra": {
       "eas": {

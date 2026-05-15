@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { useState } from 'react';
 import {
@@ -17,15 +17,14 @@ import LoadingState from '../components/LoadingState';
 import { useLocationStore } from '../store/locationStore';
 import { useMenuStore } from '../store/menuStore';
 import { useUserStore } from '../store/userStore';
+import { dlog, dwarn } from '../store/debugLog';
 import { colors, radius, shadow, spacing, typography } from '../theme';
 
-function inferMediaType(uri: string): string {
-  const lower = uri.toLowerCase();
-  if (lower.endsWith('.png')) return 'image/png';
-  if (lower.endsWith('.webp')) return 'image/webp';
-  if (lower.endsWith('.gif')) return 'image/gif';
-  return 'image/jpeg';
-}
+// Anthropic's vision API has a 5MB per-image limit. We resize to 1568 wide
+// (Claude's optimal) at JPEG quality 0.7. A typical phone photo becomes
+// ~150-300KB raw → ~200-400KB base64. Well under limit, fast to upload.
+const MENU_MAX_WIDTH = 1568;
+const MENU_JPEG_QUALITY = 0.7;
 
 export default function MenuScreen() {
   const city = useLocationStore((s) => s.city);
@@ -45,25 +44,52 @@ export default function MenuScreen() {
     setStatus('loading');
     setError(null);
     try {
-      const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      const mediaType = inferMediaType(uri);
+      dlog('menu', `analyze start uri=${uri.slice(-80)}`);
+      // Resize + recompress to keep us well under Anthropic's 5MB image limit
+      // and shrink the upload payload (so the call doesn't appear to hang).
+      const t0 = Date.now();
+      const manipulated = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: MENU_MAX_WIDTH } }],
+        {
+          compress: MENU_JPEG_QUALITY,
+          format: ImageManipulator.SaveFormat.JPEG,
+          base64: true,
+        }
+      );
+      if (!manipulated.base64) {
+        throw new Error('ImageManipulator returned no base64');
+      }
+      dlog(
+        'menu',
+        `resized in ${Date.now() - t0}ms · ${manipulated.width}x${manipulated.height} · ${manipulated.base64.length} chars base64`
+      );
+
       const cityName = city?.name ?? 'Unknown';
       const countryName = city?.country ?? '';
+      dlog(
+        'menu',
+        `analyzeMenu start (city=${cityName}, ${manipulated.base64.length} chars)`
+      );
+      const t1 = Date.now();
       const result = await analyzeMenu(
-        base64,
-        mediaType,
+        manipulated.base64,
+        'image/jpeg',
         cityName,
         countryName,
         prefs,
-        uri
+        manipulated.uri
+      );
+      dlog(
+        'menu',
+        `analyzeMenu done in ${Date.now() - t1}ms: ${result.sections.length} sections, ${result.recommendations.length} recs`
       );
       setCurrent(result);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      dwarn('menu', `failed: ${msg}`);
       setError(msg);
-      Alert.alert('Menu analysis failed', msg.slice(0, 300));
+      Alert.alert('Menu analysis failed', msg.slice(0, 500));
     }
   }
 
