@@ -239,7 +239,7 @@ export default function MapScreen({ category }: Props) {
           onRegionChangeComplete={setRegion}
           showsUserLocation={permission === 'granted'}
           showsMyLocationButton={false}
-          showsPointsOfInterest={false}
+          showsPointsOfInterests={false}
           showsBuildings={false}
           showsIndoors={false}
           toolbarEnabled={false}

@@ -32,10 +32,8 @@
       "ios": {
         "appleId": "hannu.verkasalo@gmail.com",
         "appleTeamId": "QK6RANZ39P",
-        "language": "en-US",
-        "ascApiKeyPath": "./.asc-api-key.p8",
-        "ascApiKeyId": "8W2PU5MLN5",
-        "ascApiIssuerId": "a812f001-ea81-4c8b-a82e-483a28639a64"
+        "ascAppId": "6769724545",
+        "language": "en-US"
       }
     }
   }

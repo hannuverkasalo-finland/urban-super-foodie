@@ -1,18 +1,19 @@
-import { Audio } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { dlog, dwarn } from '../store/debugLog';
 
-let introSound: Audio.Sound | null = null;
+// expo-audio replaces the deprecated expo-av. Imperative player API: create
+// a player from an asset, call play(), release() when done.
+let introPlayer: AudioPlayer | null = null;
 let configured = false;
 
 async function ensureAudioMode() {
   if (configured) return;
   try {
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: false,
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: false,
-      shouldDuckAndroid: false,
-      playThroughEarpieceAndroid: false,
+    await setAudioModeAsync({
+      allowsRecording: false,
+      playsInSilentMode: true,
+      shouldPlayInBackground: false,
+      shouldRouteThroughEarpiece: false,
     });
     configured = true;
   } catch (err) {
@@ -27,20 +28,18 @@ async function ensureAudioMode() {
 export async function playIntroFanfare(): Promise<void> {
   try {
     await ensureAudioMode();
-    if (introSound) {
+    if (introPlayer) {
       try {
-        await introSound.unloadAsync();
+        introPlayer.release();
       } catch {
         // ignore
       }
-      introSound = null;
+      introPlayer = null;
     }
-    const { sound } = await Audio.Sound.createAsync(
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('../../assets/sounds/intro.wav'),
-      { shouldPlay: true, volume: 0.85 }
-    );
-    introSound = sound;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    introPlayer = createAudioPlayer(require('../../assets/sounds/intro.wav'));
+    introPlayer.volume = 0.85;
+    introPlayer.play();
     dlog('audio', 'intro fanfare playing');
   } catch (err) {
     dwarn('audio', `playIntroFanfare failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -48,16 +47,16 @@ export async function playIntroFanfare(): Promise<void> {
 }
 
 /**
- * Stop and unload the intro sound. Call when leaving the splash.
+ * Stop and release the intro player. Call when leaving the splash.
  */
 export async function stopIntroFanfare(): Promise<void> {
-  if (!introSound) return;
+  if (!introPlayer) return;
   try {
-    await introSound.stopAsync();
-    await introSound.unloadAsync();
+    introPlayer.pause();
+    introPlayer.release();
   } catch {
     // ignore
   } finally {
-    introSound = null;
+    introPlayer = null;
   }
 }

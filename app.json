@@ -2,11 +2,10 @@
   "expo": {
     "name": "Urban Super Foodie",
     "slug": "urban-super-foodie",
-    "version": "0.1.6",
+    "version": "0.1.7",
     "orientation": "portrait",
     "scheme": "urbansuperfoodie",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "splash": {
       "backgroundColor": "#0B0B12",
       "resizeMode": "contain"
@@ -21,7 +20,8 @@
         "NSLocationWhenInUseUsageDescription": "Urban Super Foodie uses your location to find the best places to eat, drink, and explore around you.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Urban Super Foodie uses your location to find the best places to eat, drink, and explore around you, even when the app is in the background.",
         "NSPhotoLibraryUsageDescription": "Urban Super Foodie uses your photo library to set your profile picture.",
-        "NSCameraUsageDescription": "Urban Super Foodie uses the camera to take your profile picture."
+        "NSCameraUsageDescription": "Urban Super Foodie uses the camera to take your profile picture.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -37,7 +37,8 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_LOCATION",
         "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.ACCESS_BACKGROUND_LOCATION"
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.RECORD_AUDIO"
       ],
       "config": {
         "googleMaps": {
