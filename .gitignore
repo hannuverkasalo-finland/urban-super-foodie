@@ -5,6 +5,8 @@
 .eas-token
 .github-token
 .apple-password
+.asc-api-key.p8
+AuthKey_*.p8
 
 # Dependencies
 node_modules/

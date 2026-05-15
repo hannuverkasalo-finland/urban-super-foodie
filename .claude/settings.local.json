@@ -33,7 +33,15 @@
       "Bash(git -c user.name=\"USF Build\" -c user.email=\"build@local\" commit -q -m \"v0.1.4: tiered prefetch \\(phase 1 fast 25, phase 2 expand to 100\\), JSON salvage on truncation, city picker animation fix, splash fanfare audio\")",
       "Bash(git -c user.name=\"USF Build\" -c user.email=\"build@local\" commit -q -m \"v0.1.5: 3-phase eager prefetch \\(10/30/100 progressive\\), Menu tab with Claude vision analysis\")",
       "Bash(git -c user.name=\"USF Build\" -c user.email=\"build@local\" commit -q -m \"v0.1.6: fresh-install reset \\(allowBackup=false + schema bump\\), photo onError fallback, menu image resize fix, stricter curation \\(4.2/25 + OPERATIONAL only + expert sources required\\), Claude web_search for fresh Now news + 6-page Place, 48h hourly weather\")",
-      "Bash(git -c user.name=\"USF Build\" -c user.email=\"build@local\" commit -q -m \"Add iOS submit profile to eas.json\")"
+      "Bash(git -c user.name=\"USF Build\" -c user.email=\"build@local\" commit -q -m \"Add iOS submit profile to eas.json\")",
+      "Bash(export EXPO_APPLE_ID=\"hannu.verkasalo@gmail.com\")",
+      "Bash(export EXPO_APPLE_APP_SPECIFIC_PASSWORD=$\\(cat .apple-password\\))",
+      "Bash(export EXPO_APPLE_TEAM_ID=\"QK6RANZ39P\")",
+      "Bash(export EAS_NO_VCS=0)",
+      "Bash(yes \"\")",
+      "Bash(SRC=\"/c/Temporary/SW development projects/AuthKey_8W2PU5MLN5.p8\" *)",
+      "Bash(cp \"/c/Temporary/SW development projects/AuthKey_8W2PU5MLN5.p8\" /c/RadarSW/.asc-api-key.p8 *)",
+      "Bash(git -c user.name=\"USF Build\" -c user.email=\"build@local\" commit -q -m \"eas.json: ASC API key path for iOS submit \\(key id 8W2PU5MLN5\\)\")"
     ]
   }
 }
