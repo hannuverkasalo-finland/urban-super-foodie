@@ -1,5 +1,6 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import CraftScreen from '../screens/CraftScreen';
 import InfoScreen from '../screens/InfoScreen';
 import MapScreen from '../screens/MapScreen';
@@ -52,6 +53,11 @@ const DrinkScreen = () => <MapScreen category="drink" />;
 const DoScreen = () => <MapScreen category="do" />;
 
 export default function TabNavigator() {
+  // Android 15+ edge-to-edge + new arch leaves the system gesture/3-button
+  // bar overlaying our content unless we explicitly add the inset. The tab
+  // bar's intrinsic height stays the same; we just push it up.
+  const insets = useSafeAreaInsets();
+  const bottomInset = Math.max(insets.bottom, 8);
   return (
     <Tab.Navigator
       initialRouteName="Me"
@@ -66,9 +72,9 @@ export default function TabNavigator() {
           backgroundColor: colors.bgElevated,
           borderTopColor: colors.border,
           borderTopWidth: 1,
-          height: 64,
+          height: 64 + bottomInset,
           paddingTop: 6,
-          paddingBottom: 8,
+          paddingBottom: bottomInset,
         },
         tabBarItemStyle: { paddingHorizontal: 0 },
         tabBarActiveTintColor: TAB_COLORS[route.name] ?? colors.accent,
@@ -80,7 +86,11 @@ export default function TabNavigator() {
       <Tab.Screen name="Now" component={NowScreen} />
       <Tab.Screen name="Eat" component={EatScreen} />
       <Tab.Screen name="Drink" component={DrinkScreen} />
-      <Tab.Screen name="Menu" component={MenuScreen} />
+      <Tab.Screen
+        name="Menu"
+        component={MenuScreen}
+        options={{ freezeOnBlur: false }}
+      />
       <Tab.Screen name="Do" component={DoScreen} />
       <Tab.Screen name="Craft" component={CraftScreen} />
       <Tab.Screen name="Place" component={InfoScreen} />

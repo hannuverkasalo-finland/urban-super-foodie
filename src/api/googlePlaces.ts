@@ -121,6 +121,149 @@ interface NearbySearchResponse {
  * prefetch so the user sees pins on the map within seconds while the Claude
  * curators do their deeper work in the background.
  */
+export interface PlaceDetailResult {
+  placeId: string;
+  name: string;
+  rating?: number;
+  userRatingsTotal?: number;
+  priceLevel?: number;
+  formattedAddress?: string;
+  internationalPhoneNumber?: string;
+  formattedPhoneNumber?: string;
+  website?: string;
+  url?: string; // canonical Google Maps URL
+  openingHours?: {
+    weekdayText: string[];
+    /** Today (0=Sun..6=Sat) — only present if Google returned it */
+    todayLine?: string;
+    openNow?: boolean;
+  };
+  photos: string[]; // photo URLs already built
+  businessStatus?: string;
+  reviews?: Array<{
+    authorName: string;
+    rating: number;
+    relativeTime: string;
+    text: string;
+  }>;
+  editorialSummary?: string;
+}
+
+interface PlaceDetailsResponse {
+  result?: {
+    place_id?: string;
+    name?: string;
+    rating?: number;
+    user_ratings_total?: number;
+    price_level?: number;
+    formatted_address?: string;
+    international_phone_number?: string;
+    formatted_phone_number?: string;
+    website?: string;
+    url?: string;
+    business_status?: string;
+    opening_hours?: {
+      weekday_text?: string[];
+      open_now?: boolean;
+    };
+    photos?: Array<{ photo_reference?: string }>;
+    reviews?: Array<{
+      author_name?: string;
+      rating?: number;
+      relative_time_description?: string;
+      text?: string;
+    }>;
+    editorial_summary?: { overview?: string };
+  };
+  status?: string;
+  error_message?: string;
+}
+
+/**
+ * Fetch the rich Place Details for a single place. Used by the place-detail
+ * pop-up to surface opening hours, phone, website, and curated photos +
+ * review snippets without spending a Claude call.
+ */
+export async function getPlaceDetails(
+  placeId: string
+): Promise<PlaceDetailResult | null> {
+  if (!KEY) throw new Error('Missing EXPO_PUBLIC_GOOGLE_MAPS_API_KEY');
+  const fields = [
+    'place_id',
+    'name',
+    'rating',
+    'user_ratings_total',
+    'price_level',
+    'formatted_address',
+    'international_phone_number',
+    'formatted_phone_number',
+    'website',
+    'url',
+    'business_status',
+    'opening_hours',
+    'photos',
+    'reviews',
+    'editorial_summary',
+  ].join(',');
+  const url = `${BASE}/details/json?place_id=${encodeURIComponent(placeId)}&fields=${fields}&key=${KEY}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      logFailure('getPlaceDetails', `HTTP ${res.status}`);
+      return null;
+    }
+    const json: PlaceDetailsResponse = await res.json();
+    if (json.status && json.status !== 'OK') {
+      logFailure(
+        'getPlaceDetails',
+        `${json.status}: ${json.error_message ?? 'no detail'}`
+      );
+      return null;
+    }
+    const r = json.result;
+    if (!r?.place_id) return null;
+    // Today's hour line. Google returns weekday_text ordered Mon..Sun.
+    const weekdayText = r.opening_hours?.weekday_text ?? [];
+    const jsToday = new Date().getDay(); // 0=Sun..6=Sat
+    const googleIdx = jsToday === 0 ? 6 : jsToday - 1;
+    const todayLine = weekdayText[googleIdx];
+    return {
+      placeId: r.place_id,
+      name: r.name ?? 'Unnamed',
+      rating: r.rating,
+      userRatingsTotal: r.user_ratings_total,
+      priceLevel: r.price_level,
+      formattedAddress: r.formatted_address,
+      internationalPhoneNumber: r.international_phone_number,
+      formattedPhoneNumber: r.formatted_phone_number,
+      website: r.website,
+      url: r.url,
+      businessStatus: r.business_status,
+      openingHours: r.opening_hours
+        ? {
+            weekdayText,
+            todayLine,
+            openNow: r.opening_hours.open_now,
+          }
+        : undefined,
+      photos: (r.photos ?? [])
+        .slice(0, 6)
+        .map((p) => (p.photo_reference ? buildPhotoUrl(p.photo_reference, 1200) : ''))
+        .filter(Boolean),
+      reviews: (r.reviews ?? []).slice(0, 5).map((rev) => ({
+        authorName: rev.author_name ?? 'Anonymous',
+        rating: rev.rating ?? 0,
+        relativeTime: rev.relative_time_description ?? '',
+        text: rev.text ?? '',
+      })),
+      editorialSummary: r.editorial_summary?.overview,
+    };
+  } catch (err) {
+    logFailure('getPlaceDetails', err);
+    return null;
+  }
+}
+
 export async function searchNearby(
   lat: number,
   lng: number,

@@ -292,7 +292,7 @@ Category: ${categoryDescription}
 User preferences:
 ${preferencesBlock(prefs)}${excludeBlock}
 
-Task: Return the top ${count} ${categoryDescription} in ${cityName} that best match this user, ranked from #1 (most recommended) downward.
+Task: Return the top ${count} ${categoryDescription} within ~30 km of ${cityName} that best match this user, ranked from #1 (most recommended) downward. Use ratings, expert citations, recent reviews, atmosphere descriptions, and originality to break ties.
 
 Output JSON only — an array of ${count} objects with this exact shape:
 [
@@ -759,13 +759,135 @@ Rules:
     { signal: opts.signal, timeoutMs: opts.timeoutMs ?? 90_000 }
   );
   const gen = extractJson<MenuGen>(raw, 'parse.menu');
+  // Normalize defensively — Claude can drop optional fields and a single
+  // `undefined.length` in the renderer would crash the result UI silently.
   return {
     analyzedAt: Date.now(),
     photoUri,
     languageDetected: gen.languageDetected ?? 'Unknown',
     menuTitle: gen.menuTitle ?? 'Menu',
     currency: gen.currency ?? '',
-    sections: gen.sections ?? [],
-    recommendations: gen.recommendations ?? [],
+    sections: (gen.sections ?? []).map((s) => ({
+      name: s.name ?? '',
+      originalName: s.originalName ?? '',
+      items: (s.items ?? []).map((it) => ({
+        originalName: it.originalName ?? '',
+        englishName: it.englishName ?? '',
+        description: it.description ?? '',
+        price: it.price ?? '',
+      })),
+    })),
+    recommendations: (gen.recommendations ?? []).map((r) => ({
+      itemName: r.itemName ?? '',
+      whyForYou: r.whyForYou ?? '',
+      tags: r.tags ?? [],
+    })),
+  };
+}
+
+// ============================================================
+// Place enrichment — for the per-place detail pop-up.
+// ============================================================
+
+export interface PlaceEnrichment {
+  /** Punchy 1-sentence "why go here today" — addressed to the user. */
+  whyToday: string;
+  /** 2-3 paragraph deep summary, weighted to user prefs. */
+  summary: string;
+  /** What's unique/special to try here — list of 4-7 short bullets. */
+  signatureItems: string[];
+  /** Curated tags this user will care about (e.g. "natural wine", "kid-friendly"). */
+  matchTags: string[];
+  /** Up to 3 short paraphrased review highlights with source attribution. */
+  reviewHighlights: Array<{ source: string; quote: string }>;
+  /** Best fit for: e.g. "late dinner", "wine bar after work", "lazy Sunday brunch". */
+  bestFitFor: string;
+  /** Optional Instagram handle if Claude knows / can guess it. */
+  instagramHandle?: string;
+  generatedAt: number;
+}
+
+interface EnrichGen {
+  whyToday: string;
+  summary: string;
+  signatureItems: string[];
+  matchTags: string[];
+  reviewHighlights: Array<{ source: string; quote: string }>;
+  bestFitFor: string;
+  instagramHandle?: string;
+}
+
+const CATEGORY_SOURCE_LIST_FOR_ENRICH: Record<string, string> = {
+  eat: 'World of Mouth, MICHELIN Guide, World\'s 50 Best Restaurants, Raisin, OAD, Gault&Millau, Star Wine List, Le Fooding, La Liste, Gambero Rosso, Identità Golose, Eater, Punch, The Infatuation, Time Out, Bloomberg, Monocle, Kinfolk, MAD Feed, Condé Nast Traveler, Food & Wine, Bon Appétit, Fine Dining Lovers, Italy Segreta, Scatti di Gusto, Dissapore, Beli, Tabelog, OpenTable, Resy, Yelp, Google Maps, HappyCow, Untappd, RateBeer, Vivino, CellarTracker, Reddit r/finedining, Tripadvisor',
+  drink:
+    'World\'s 50 Best Bars, Top 500 Bars, World of Mouth, Raisin, Star Wine List, OAD, MICHELIN Guide, Le Fooding, Punch, VinePair, Difford\'s Guide, Gault&Millau, Gambero Rosso, Identità Golose, CellarTracker, Vivino, Untappd, RateBeer, BeerAdvocate, The Infatuation, Eater, Condé Nast Traveler, Food & Wine, Bon Appétit, La Liste, Time Out, Italy Segreta, Dissapore, Scatti di Gusto, Beli, Tabelog, Resy, OpenTable, Yelp, Google Maps, Reddit r/cocktails+r/wine+r/CraftBeer, Tripadvisor',
+  do: 'World of Mouth, Atlas Obscura, Google Arts & Culture, Wanderlog, Komoot, Roadtrippers, Culture Trip, Monocle Travel Guides, Kinfolk City Guides, Spotted by Locals, Use-It Travel Guides, Wallpaper City Guides, Condé Nast Traveler, Cool Cousin, Foursquare, Airbnb Experiences, GetYourGuide, Viator, Withlocals, GuruWalk, AllTrails, Outdooractive, The Outbound, Google Maps, Yelp, Beli, Lonely Planet, Time Out, Design Hotels, Tablet Hotels, Tripadvisor, Reddit r/travel, TikTok Travel',
+};
+
+export async function enrichPlace(
+  args: {
+    placeName: string;
+    placeAddress?: string;
+    placeNeighborhood?: string;
+    cityName: string;
+    countryName: string;
+    category: 'eat' | 'drink' | 'do';
+    googleRating?: number;
+    sourceInspirations?: string[];
+  },
+  prefs: UserPreferences,
+  profile: UserProfile,
+  opts: { signal?: AbortSignal; timeoutMs?: number } = {}
+): Promise<PlaceEnrichment> {
+  const sources =
+    CATEGORY_SOURCE_LIST_FOR_ENRICH[args.category] ??
+    CATEGORY_SOURCE_LIST_FOR_ENRICH.eat;
+  const nickname = profile.nickname || 'foodie traveler';
+
+  const system = `You are a brilliant food/drink/culture concierge writing a personalised pop-up briefing for a single venue. Your knowledge spans these reference sources:
+${sources}
+
+Be specific, warm, slightly playful. Cite real sources you've drawn from. Never invent menu items or reviews you can't justify — if uncertain, keep it general. Respond with valid JSON only.`;
+
+  const user = `Venue: ${args.placeName}
+${args.placeAddress ? `Address: ${args.placeAddress}\n` : ''}${args.placeNeighborhood ? `Neighbourhood: ${args.placeNeighborhood}\n` : ''}City: ${args.cityName}, ${args.countryName}
+Category: ${args.category}
+Google rating: ${args.googleRating ?? 'unknown'}
+${args.sourceInspirations?.length ? `Already-cited inspiration sources: ${args.sourceInspirations.join(', ')}\n` : ''}
+User to address: ${nickname}
+Food preferences: ${prefs.foodStyles.join(', ') || '—'}
+Drink preferences: ${prefs.drinkStyles.join(', ') || '—'}
+Activity preferences: ${prefs.activityTypes.join(', ') || '—'}
+${prefs.foodFreeText ? 'Food notes: ' + prefs.foodFreeText + '\n' : ''}${prefs.drinkFreeText ? 'Drink notes: ' + prefs.drinkFreeText + '\n' : ''}
+Output JSON only, exact shape:
+{
+  "whyToday": "ONE punchy sentence addressed to ${nickname} — be witty, weather-aware if relevant, anchor to one signature thing they'd love (max 25 words)",
+  "summary": "2-3 short paragraphs (max 180 words total). What makes this place special, what to expect, what feels different from other ${args.category} spots in ${args.cityName}. Reference the user's prefs naturally.",
+  "signatureItems": ["4-7 specific things to try / order / experience here, each ≤8 words"],
+  "matchTags": ["3-6 short tags matching their preferences, e.g. 'natural wine', 'late-night', 'design-led'"],
+  "reviewHighlights": [
+    { "source": "Source name from the list above OR Google Maps", "quote": "12-25 word paraphrased highlight" }
+  ] (3 entries),
+  "bestFitFor": "8-12 words: when/why to come (e.g. 'late dinner with natural wine after a Vespa ride')",
+  "instagramHandle": "@handle if known with high confidence; otherwise empty string"
+}
+Output ONLY the JSON object.`;
+
+  const raw = await callClaude(system, user, 2500, `claude.enrich`, {
+    timeoutMs: opts.timeoutMs ?? 45_000,
+    signal: opts.signal,
+  });
+  const gen = extractJson<EnrichGen>(raw, 'parse.enrich');
+  return {
+    whyToday: gen.whyToday ?? '',
+    summary: gen.summary ?? '',
+    signatureItems: gen.signatureItems ?? [],
+    matchTags: gen.matchTags ?? [],
+    reviewHighlights: gen.reviewHighlights ?? [],
+    bestFitFor: gen.bestFitFor ?? '',
+    instagramHandle: gen.instagramHandle && gen.instagramHandle.length > 1
+      ? gen.instagramHandle
+      : undefined,
+    generatedAt: Date.now(),
   };
 }

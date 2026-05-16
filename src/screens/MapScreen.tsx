@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import CityPickerModal from '../components/CityPickerModal';
 import MapMarker from '../components/MapMarker';
 import PlaceCard from '../components/PlaceCard';
+import PlaceDetailModal from '../components/PlaceDetailModal';
 import StatusBanner from '../components/StatusBanner';
 import { useContentStore } from '../store/contentStore';
 import { useLocationStore } from '../store/locationStore';
@@ -103,6 +104,7 @@ export default function MapScreen({ category }: Props) {
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pickerVisible, setPickerVisible] = useState(false);
+  const [detailPlace, setDetailPlace] = useState<CuratedPlace | null>(null);
   const mapRef = useRef<MapView | null>(null);
   const scrollRef = useRef<ScrollView | null>(null);
   // Track which city key we last animated to so a city change (via picker
@@ -195,6 +197,12 @@ export default function MapScreen({ category }: Props) {
     });
   }
 
+  // Tapping a marker or a card opens the full-screen detail modal.
+  function openDetail(p: CuratedPlace) {
+    setSelectedId(p.id);
+    setDetailPlace(p);
+  }
+
   const statusLine =
     locationError && !city
       ? locationError
@@ -272,7 +280,7 @@ export default function MapScreen({ category }: Props) {
               key={p.id}
               coordinate={{ latitude: p.lat, longitude: p.lng }}
               anchor={{ x: 0.5, y: 0.5 }}
-              onPress={() => focusPlace(p, i)}
+              onPress={() => openDetail(p)}
               tracksViewChanges={true}
             >
               <MapMarker
@@ -350,7 +358,7 @@ export default function MapScreen({ category }: Props) {
                   { lat: region.latitude, lng: region.longitude },
                   { lat: p.lat, lng: p.lng }
                 )}
-                onPress={() => focusPlace(p, i)}
+                onPress={() => openDetail(p)}
               />
             </View>
           ))}
@@ -360,6 +368,11 @@ export default function MapScreen({ category }: Props) {
       <CityPickerModal
         visible={pickerVisible}
         onClose={() => setPickerVisible(false)}
+      />
+
+      <PlaceDetailModal
+        place={detailPlace}
+        onClose={() => setDetailPlace(null)}
       />
     </SafeAreaView>
   );

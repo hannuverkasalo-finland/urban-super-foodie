@@ -33,8 +33,8 @@ export function cityKeyFor(name: string, country: string): string {
 
 const PHASE1_COUNT = 10; // ~5-10s target for expert-curated first batch
 const PHASE2_TARGET = 30; // ~30-45s total
-const PHASE3_TARGET = 100; // ~2-3min total
-const PHASE0_RADIUS_METERS = 2500;
+const PHASE3_TARGET = 200; // ~3-5min — user-requested deep pool (within 30km radius)
+const PHASE0_RADIUS_METERS = 3000; // ~3km — close-in instant nearby search
 
 // Stricter curation thresholds — only top-rated, currently-open venues.
 const MIN_RATING = 4.2;

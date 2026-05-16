@@ -1,6 +1,7 @@
+import { useFocusEffect } from '@react-navigation/native';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Image,
@@ -83,6 +84,23 @@ export default function MenuScreen() {
       abortRef.current?.abort();
     };
   }, []);
+
+  // Safety net: whenever the menu store updates with a fresh analysis,
+  // reconcile local stage state so the result UI shows without needing a
+  // tab-refocus (which the user observed as the bug). Also re-run on focus.
+  useEffect(() => {
+    if (menu && status === 'ready') {
+      setStage('done');
+      setLocalPreview(null);
+    }
+  }, [menu, status]);
+  useFocusEffect(
+    useCallback(() => {
+      if (menu && status === 'ready') {
+        setStage('done');
+      }
+    }, [menu, status])
+  );
 
   function reportStage(s: MenuStage, extra?: string) {
     setStage(s);
