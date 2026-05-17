@@ -1,11 +1,12 @@
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AppState, View } from 'react-native';
-import PermissionPrompt from '../components/PermissionPrompt';
 import CityPickerModal from '../components/CityPickerModal';
+import PermissionPrompt from '../components/PermissionPrompt';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import SplashScreen from '../screens/SplashScreen';
+import WelcomeRevealScreen from '../screens/WelcomeRevealScreen';
 import {
   checkPermissionState,
   requestLocationPermission,
@@ -13,9 +14,11 @@ import {
   startForegroundTracking,
   stopForegroundTracking,
 } from '../services/locationService';
-import { prefetchCity } from '../services/prefetchService';
+import { cityKeyFor, prefetchCity } from '../services/prefetchService';
+import { buildWelcomeForCurrentCity } from '../services/welcomeService';
 import { useLocationStore } from '../store/locationStore';
-import { useUserStore } from '../store/userStore';
+import { computeUserVersion, useUserStore } from '../store/userStore';
+import { useWelcomeStore } from '../store/welcomeStore';
 import { colors } from '../theme';
 import TabNavigator from './TabNavigator';
 
@@ -29,41 +32,71 @@ export default function AppNavigator() {
   const city = useLocationStore((s) => s.city);
   const [permissionPromptShown, setPermissionPromptShown] = useState(false);
   const [cityPickerOpen, setCityPickerOpen] = useState(false);
+  // On every cold-start (or city change), show the WelcomeReveal before tabs.
+  // This flag is only true between "city resolved" and "user dismissed reveal".
+  const [revealPending, setRevealPending] = useState(true);
+  // Track which cityKey the reveal was already shown for THIS session so we
+  // don't re-pop it on every state update.
+  const revealShownForCityKey = useRef<string | null>(null);
 
-  // Eagerly start prefetch the moment we have a city + onboarding done. Doesn't
-  // wait for the user to navigate to a tab — by the time they tap Eat/Drink,
-  // phase 1's first 10 places should already be on-screen.
+  // -------- Eager location: request the moment the splash finishes --------
+  // This runs before onboarding too, so by the time the user reaches the
+  // welcome reveal we already know the city (which the welcome content
+  // depends on).
+  useEffect(() => {
+    if (!splashDone) return;
+    void runLocationFlow();
+  }, [splashDone]);
+
+  // -------- On every foreground (cold start OR background-return) --------
+  // Re-check location permission AND re-arm the welcome reveal so the user
+  // sees a fresh briefing every time they come back to the app.
+  useEffect(() => {
+    if (!splashDone) return;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        void runLocationFlow();
+        // Re-arm reveal for the current city.
+        setRevealPending(true);
+        revealShownForCityKey.current = null;
+      }
+    });
+    return () => sub.remove();
+  }, [splashDone]);
+
+  // -------- Eager city research: kick off the moment city + onboarding done --------
   useEffect(() => {
     if (!splashDone || !hasOnboarded || !city) return;
     void prefetchCity(city.name, city.country, preferences);
   }, [splashDone, hasOnboarded, city, preferences]);
 
+  // -------- Eager welcome generation when city resolves (any state) --------
+  // If the user is still onboarding, this just front-runs the work. If they're
+  // already onboarded, this populates the content for the reveal that's about
+  // to appear.
   useEffect(() => {
-    if (!splashDone) return;
-    if (!hasOnboarded) return;
-    runLocationFlow();
-  }, [splashDone, hasOnboarded]);
-
-  useEffect(() => {
-    if (!splashDone || !hasOnboarded) return;
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') {
-        // re-prompt every time the app comes to the foreground if not granted
-        runLocationFlow();
-      }
-    });
-    return () => sub.remove();
-  }, [splashDone, hasOnboarded]);
+    if (!splashDone || !city) return;
+    const cityKey = cityKeyFor(city.name, city.country);
+    const userVersion = computeUserVersion();
+    const fresh = useWelcomeStore.getState().getFresh(cityKey, userVersion);
+    if (!fresh) {
+      void buildWelcomeForCurrentCity({ force: false });
+    }
+  }, [splashDone, city]);
 
   async function runLocationFlow() {
-    const result = await requestLocationPermission();
-    if (result.granted) {
-      setPermissionPromptShown(false);
-      await resolveCurrentCity();
-      await startForegroundTracking();
-    } else {
-      stopForegroundTracking();
-      setPermissionPromptShown(true);
+    try {
+      const result = await requestLocationPermission();
+      if (result.granted) {
+        setPermissionPromptShown(false);
+        await resolveCurrentCity();
+        await startForegroundTracking();
+      } else {
+        stopForegroundTracking();
+        setPermissionPromptShown(true);
+      }
+    } catch {
+      // location service swallows + logs internally
     }
   }
 
@@ -72,7 +105,7 @@ export default function AppNavigator() {
   }, []);
 
   useEffect(() => {
-    checkPermissionState();
+    void checkPermissionState();
   }, []);
 
   if (!splashDone) {
@@ -83,7 +116,29 @@ export default function AppNavigator() {
     return (
       <OnboardingScreen
         onDone={() => {
-          // location flow will pick up via the effect once hasOnboarded flips
+          // hasOnboarded flipped in the store inside OnboardingScreen.
+          // revealPending is already true; the next render with
+          // hasOnboarded===true will go through the reveal-or-tabs branch.
+        }}
+      />
+    );
+  }
+
+  // -------- Returning users: show WelcomeReveal once per city per cold-start --------
+  // Skip if we have no city resolved yet (user denied location AND hasn't
+  // picked a city) — go straight to tabs and they can use the city picker.
+  const cityKey = city ? cityKeyFor(city.name, city.country) : null;
+  const shouldShowReveal =
+    revealPending &&
+    !!cityKey &&
+    revealShownForCityKey.current !== cityKey;
+
+  if (shouldShowReveal && cityKey) {
+    return (
+      <WelcomeRevealScreen
+        onDone={() => {
+          revealShownForCityKey.current = cityKey;
+          setRevealPending(false);
         }}
       />
     );
@@ -110,8 +165,17 @@ export default function AppNavigator() {
           },
         }}
       >
-        <RootStack.Navigator screenOptions={{ headerShown: false }}>
-          <RootStack.Screen name="Tabs" component={TabNavigator} />
+        <RootStack.Navigator
+          screenOptions={{ headerShown: false }}
+          initialRouteName="Tabs"
+        >
+          <RootStack.Screen
+            name="Tabs"
+            component={TabNavigator}
+            // Start on the Now tab so the user sees their just-revealed briefing
+            // reflected in the live tab.
+            initialParams={{ screen: 'Now' }}
+          />
         </RootStack.Navigator>
       </NavigationContainer>
 

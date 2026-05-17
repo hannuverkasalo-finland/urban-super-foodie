@@ -1,9 +1,11 @@
 import type {
   ContentPage,
+  ExtendedPreferences,
   MenuAnalysis,
   NowContent,
   UserPreferences,
   UserProfile,
+  WelcomeCardSpec,
 } from '../types';
 import type { WeatherSnapshot } from './openMeteo';
 import { describeWeather } from './openMeteo';
@@ -890,4 +892,132 @@ Output ONLY the JSON object.`;
       : undefined,
     generatedAt: Date.now(),
   };
+}
+
+// ============================================================
+// Welcome content generators (cartoon card spec, joke, paragraph)
+// ============================================================
+
+function extendedPrefsBlock(ext: ExtendedPreferences): string {
+  const axis = (v: number, left: string, right: string) => {
+    if (v < 0.33) return left;
+    if (v > 0.66) return right;
+    return `balanced between ${left} and ${right}`;
+  };
+  return [
+    `Style axis: ${axis(ext.classicHipster, 'classic/elegant', 'hipster/explorative')}`,
+    `Discovery axis: ${axis(ext.mustDoVsNew, 'must-do icons', 'new/under-the-radar')}`,
+    `Risk axis: ${axis(ext.safeFunky, 'safe choices', 'funky/raw/wild')}`,
+  ].join(' · ');
+}
+
+export async function generateWelcomeJoke(
+  cityName: string,
+  countryName: string,
+  profile: UserProfile,
+  prefs: UserPreferences
+): Promise<string> {
+  const system = `You are a witty stand-up writer who knows world cities intimately. Write a single one-liner joke (2-3 sentences max) about a traveler newly arrived in a city. The joke MUST:
+- Address the traveler by their nickname
+- Reference at least one HYPER-SPECIFIC thing about the city (a real neighborhood, dish, monument, weather quirk, local custom, traffic joke, local language tic — not generic clichés)
+- Be warm, observational, slightly self-deprecating; never mean
+- Land in 50-70 words
+- Output plain text, no quotes around it.`;
+
+  const user = `Traveler nickname: ${profile.nickname || 'foodie'}
+City: ${cityName}, ${countryName}
+Their food loves: ${prefs.foodStyles.slice(0, 4).join(', ') || 'open to anything'}
+Their drink loves: ${prefs.drinkStyles.slice(0, 4).join(', ') || 'open to anything'}
+
+Write the joke. Output ONLY the joke text, nothing else.`;
+
+  const raw = await callClaude(system, user, 600, 'claude.welcomeJoke', {
+    timeoutMs: 60_000,
+  });
+  return raw.trim().replace(/^["']|["']$/g, '');
+}
+
+export async function generateWelcomeParagraph(
+  cityName: string,
+  countryName: string,
+  profile: UserProfile,
+  prefs: UserPreferences,
+  extPrefs: ExtendedPreferences,
+  now: Date = new Date()
+): Promise<string> {
+  const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][now.getDay()];
+  const hour = now.getHours();
+  const partOfDay =
+    hour < 5 ? 'late night' : hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : hour < 21 ? 'evening' : 'night';
+
+  const system = `You are a brilliantly witty travel concierge writing a single rich, slightly mischievous paragraph predicting how a specific traveler is about to spend their next day or two in a specific city. The paragraph MUST:
+- Address the traveler by their nickname throughout
+- Reference real, specific places, dishes, drinks, neighborhoods, or quirks of the city (avoid generic platitudes)
+- Weave in the traveler's stated food/drink/activity preferences AND their three vibe axes
+- Be one continuous paragraph, 130-180 words, warm + funny, with at least two real laughs
+- End with a punchy one-line "and you're going to love it." style flourish that fits the traveler's vibe
+- Plain text, no markdown.`;
+
+  const user = `Traveler:
+- Nickname: ${profile.nickname || 'foodie'}
+- Age: ${profile.birthYear ? new Date().getFullYear() - profile.birthYear : '?'}
+- Gender: ${profile.gender ?? 'unspecified'}
+- Language: ${profile.language}
+
+City: ${cityName}, ${countryName}
+Local time: ${dayName} ${partOfDay}
+
+Food preferences: ${prefs.foodStyles.join(', ') || 'open to anything'}
+Drink preferences: ${prefs.drinkStyles.join(', ') || 'open to anything'}
+Activity preferences: ${prefs.activityTypes.join(', ') || 'open to anything'}
+${prefs.foodFreeText ? 'Food notes: ' + prefs.foodFreeText : ''}
+${prefs.drinkFreeText ? 'Drink notes: ' + prefs.drinkFreeText : ''}
+
+Vibe sliders: ${extendedPrefsBlock(extPrefs)}
+
+Write the paragraph. Output ONLY the paragraph text.`;
+
+  const raw = await callClaude(system, user, 1200, 'claude.welcomeParagraph', {
+    timeoutMs: 75_000,
+  });
+  return raw.trim();
+}
+
+interface WelcomeCardGen {
+  cityEmojis: string[];
+  headline: string;
+  subhead: string;
+  landmarkSearchQuery: string;
+  accentHex: string;
+}
+
+export async function generateWelcomeCardSpec(
+  cityName: string,
+  countryName: string,
+  profile: UserProfile,
+  prefs: UserPreferences
+): Promise<{ gen: WelcomeCardGen; raw: string }> {
+  const system = `You design playful "travel postcard" headers for an app that introduces a traveler to a city. Pick city-specific signature symbols (food, landmarks, vibe) the place is famous for; never generic globes/planes. Respond JSON only — no markdown.`;
+
+  const user = `City: ${cityName}, ${countryName}
+Traveler nickname: ${profile.nickname || 'foodie'}
+Their food loves: ${prefs.foodStyles.slice(0, 5).join(', ') || 'open to anything'}
+Their drink loves: ${prefs.drinkStyles.slice(0, 5).join(', ') || 'open to anything'}
+
+Output ONLY this JSON shape:
+{
+  "cityEmojis": ["4-6 single-emoji symbols that scream THIS city — landmarks, signature dishes, signature drinks. e.g. for Tokyo: 🗼🍣🍶🌸🏮"],
+  "headline": "4-7 word punchy welcome line addressing the traveler by nickname, e.g. 'Hannu, Como is yours.'",
+  "subhead": "8-14 word evocative tagline naming one signature thing about this city",
+  "landmarkSearchQuery": "best 1-3 word Google Maps query string to find a famous photogenic landmark in this city, e.g. 'Duomo Como', 'Eiffel Tower', 'Vardar River Stone Bridge'",
+  "accentHex": "a hex color (#RRGGBB) that visually represents this city's energy"
+}
+
+Output ONLY the JSON.`;
+
+  const raw = await callClaude(system, user, 800, 'claude.welcomeCard', {
+    timeoutMs: 45_000,
+  });
+  const gen = extractJson<WelcomeCardGen>(raw, 'parse.welcomeCard');
+  return { gen, raw };
 }

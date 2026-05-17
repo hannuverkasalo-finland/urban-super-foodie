@@ -3,6 +3,7 @@ import { useState } from 'react';
 import {
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -14,12 +15,16 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DebugPanel from '../components/DebugPanel';
 import MultiSelectChips from '../components/MultiSelectChips';
+import PreferenceSlider from '../components/PreferenceSlider';
 import Section from '../components/Section';
 import { ACTIVITY_TYPES } from '../constants/activityTypes';
 import { DRINK_STYLES } from '../constants/drinkStyles';
 import { FOOD_STYLES } from '../constants/foodStyles';
 import { LANGUAGES } from '../constants/languages';
+import WelcomeRevealScreen from './WelcomeRevealScreen';
+import { useLocationStore } from '../store/locationStore';
 import { useUserStore } from '../store/userStore';
+import { buildWelcomeForCurrentCity } from '../services/welcomeService';
 import { colors, radius, spacing, typography } from '../theme';
 import type { Gender } from '../types';
 
@@ -33,17 +38,31 @@ const GENDER_OPTIONS: { value: Gender; label: string }[] = [
 export default function MeScreen() {
   const profile = useUserStore((s) => s.profile);
   const preferences = useUserStore((s) => s.preferences);
+  const extendedPreferences = useUserStore((s) => s.extendedPreferences);
   const updateProfile = useUserStore((s) => s.updateProfile);
   const updatePreferences = useUserStore((s) => s.updatePreferences);
+  const updateExtendedPreferences = useUserStore(
+    (s) => s.updateExtendedPreferences
+  );
   const toggleFoodStyle = useUserStore((s) => s.toggleFoodStyle);
   const toggleDrinkStyle = useUserStore((s) => s.toggleDrinkStyle);
   const toggleActivity = useUserStore((s) => s.toggleActivity);
+  const city = useLocationStore((s) => s.city);
 
   const [yearText, setYearText] = useState(
     profile.birthYear ? String(profile.birthYear) : ''
   );
   const [debugOpen, setDebugOpen] = useState(false);
+  const [revealOpen, setRevealOpen] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
+
+  function reintroduceMe() {
+    // Force a fresh generation against current profile+prefs+sliders+city,
+    // then surface the WelcomeReveal modal. The reveal screen itself reads
+    // welcomeStore directly so partial results show up immediately.
+    void buildWelcomeForCurrentCity({ force: true });
+    setRevealOpen(true);
+  }
 
   async function pickPhoto() {
     setPhotoError(null);
@@ -269,10 +288,80 @@ export default function MeScreen() {
               accent={colors.do}
             />
           </Section>
+
+          <Section
+            title="Vibe sliders"
+            subtitle="Three quick axes that bend our picks toward your taste."
+          >
+            <View style={styles.slidersBlock}>
+              <PreferenceSlider
+                label="Style"
+                leftLabel="Classic / Elegant"
+                rightLabel="Hipster / Explorative"
+                value={extendedPreferences.classicHipster}
+                onChange={(v) =>
+                  updateExtendedPreferences({ classicHipster: v })
+                }
+                accent={colors.accent}
+              />
+              <PreferenceSlider
+                label="Discovery"
+                leftLabel="Must-do icons"
+                rightLabel="New & interesting"
+                value={extendedPreferences.mustDoVsNew}
+                onChange={(v) =>
+                  updateExtendedPreferences({ mustDoVsNew: v })
+                }
+                accent={colors.eat}
+              />
+              <PreferenceSlider
+                label="Risk"
+                leftLabel="Safe choices"
+                rightLabel="Funky & crazy"
+                value={extendedPreferences.safeFunky}
+                onChange={(v) =>
+                  updateExtendedPreferences({ safeFunky: v })
+                }
+                accent={colors.drink}
+              />
+            </View>
+          </Section>
+
+          <View style={styles.reintroBlock}>
+            <Pressable
+              onPress={reintroduceMe}
+              disabled={!city}
+              style={({ pressed }) => [
+                styles.reintroButton,
+                !city && { opacity: 0.4 },
+                pressed && { opacity: 0.8 },
+              ]}
+            >
+              <Text style={styles.reintroEmoji}>✨</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.reintroTitle}>
+                  Re-introduce me to {city?.name ?? 'this city'}
+                </Text>
+                <Text style={styles.reintroBody}>
+                  Generate a fresh welcome card, joke, and 24-hour briefing
+                  using your latest profile + sliders.
+                </Text>
+              </View>
+              <Text style={styles.reintroChevron}>›</Text>
+            </Pressable>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
 
       <DebugPanel visible={debugOpen} onClose={() => setDebugOpen(false)} />
+
+      <Modal
+        visible={revealOpen}
+        animationType="slide"
+        presentationStyle="fullScreen"
+      >
+        <WelcomeRevealScreen onDone={() => setRevealOpen(false)} />
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -364,4 +453,34 @@ const styles = StyleSheet.create({
   chipOn: { backgroundColor: colors.accent, borderColor: colors.accent },
   chipLabel: { ...typography.small, color: colors.textMuted },
   chipLabelOn: { color: '#0B0B12', fontWeight: '700' },
+  slidersBlock: { marginTop: spacing.s },
+  reintroBlock: {
+    marginTop: spacing.l,
+  },
+  reintroButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.m,
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.l,
+    borderWidth: 1,
+    borderColor: colors.accent + '66',
+    gap: spacing.m,
+  },
+  reintroEmoji: { fontSize: 32 },
+  reintroTitle: {
+    ...typography.bodyBold,
+    color: colors.text,
+    marginBottom: 2,
+  },
+  reintroBody: {
+    ...typography.small,
+    color: colors.textMuted,
+    lineHeight: 18,
+  },
+  reintroChevron: {
+    fontSize: 28,
+    color: colors.textMuted,
+    marginLeft: 'auto',
+  },
 });

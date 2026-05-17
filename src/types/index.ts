@@ -168,3 +168,44 @@ export interface MenuAnalysis {
   sections: MenuSection[];
   recommendations: MenuRecommendation[];
 }
+
+/**
+ * Three vibe sliders (0..1). Used as additional input signal to Claude
+ * curation so picks lean toward the user's stated taste axis.
+ */
+export interface ExtendedPreferences {
+  /** 0 = classic/elegant, 1 = hipster/explorative */
+  classicHipster: number;
+  /** 0 = must-do staples, 1 = new/interesting/under-the-radar */
+  mustDoVsNew: number;
+  /** 0 = safe choices, 1 = funky/crazy/raw */
+  safeFunky: number;
+}
+
+export interface WelcomeCardSpec {
+  /** 4-6 single-emoji symbols Claude picks to represent the city's food/landmark identity. */
+  cityEmojis: string[];
+  /** Punchy 4-8 word headline for the card. */
+  headline: string;
+  /** One-sentence subhead with vibe words. */
+  subhead: string;
+  /** Best Google Place ID for a city-landmark photo, when available. */
+  landmarkPlaceId?: string;
+  /** Direct photo URL (Google Places photo URL) for the landmark background. */
+  landmarkPhotoUrl?: string;
+  /** Hex accent color picked to match the city's vibe. */
+  accentHex: string;
+}
+
+export interface WelcomeContent {
+  cityKey: string;
+  cityDisplayName: string;
+  /** Hash of the relevant user fields at generation time; used to detect when
+   *  the user has updated their profile/preferences and the welcome should be
+   *  re-generated. */
+  userVersion: string;
+  generatedAt: number;
+  cardSpec: WelcomeCardSpec;
+  joke: string;
+  paragraph: string;
+}
